@@ -1,0 +1,47 @@
+# .github/workflows/CI.yml
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main 
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - '1' # Test on the latest stable version of Julia 1.x
+          # - 'nightly'
+        os:
+          - ubuntu-latest
+          # - macOS-latest
+          # - windows-latest
+        arch:
+          - x64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Julia
+        uses: julia-actions/setup-julia@v1
+        with:
+          version: ${{ matrix.version }}
+          arch: ${{ matrix.arch }}
+
+      - name: Cache artifacts
+        uses: julia-actions/cache@v1
+
+      - name: Install dependencies
+        run: julia --project -e 'using Pkg; Pkg.instantiate()'
+
+      - name: Run tests
+        run: julia --project -e 'using Pkg; Pkg.test()'
