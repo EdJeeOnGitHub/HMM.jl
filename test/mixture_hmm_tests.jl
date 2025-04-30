@@ -83,13 +83,75 @@ import .TestUtils as SF
         @test params.σ > 0
     end
 
+
+
+    @testset "Mixture EM Convergence and Recovery - near optimum" begin
+        # Run EM using the parallel method dispatching on Type
+        true_params  = MixtureHMMParams(
+            ComponentArray(
+                ω = true_ω,
+                η_raw = true_η,
+                η_θ = true_η_θ,
+                T_list = true_T_list,
+                σ = true_σ
+            )
+        )
+        mixture_data = MixtureHMMData(y_rag, K, D)
+        initial_params = initialize_params(MixtureHMMParams, SEED+1, mixture_data)
+        initial_params.ω .= true_params.ω .+ randn(K) * 0.01
+        initial_params.η_raw .= true_params.η_raw
+        initial_params.η_θ .= true_params.η_θ
+        initial_params.T_list .= true_params.T_list
+        logdensity(initial_params, mixture_data)
+        best_params = run_em!(initial_params, mixture_data, maxiter=1_000, tol=1e-4, verbose=false)
+
+
+
+        
+        @test best_params isa MixtureHMMParams{Float64}
+        final_logp = logdensity(best_params, mixture_data)
+        @test isfinite(final_logp)
+        
+        # --- Parameter Recovery ---
+        # Sort estimated parameters for comparison
+        est_η_perm = sortperm(best_params.η_raw)
+        est_ω_perm = sortperm(best_params.ω)
+
+        est_η_sorted = best_params.η_raw[est_η_perm]
+        est_η_θ = best_params.η_θ
+        est_ω_sorted = best_params.ω[est_ω_perm]
+        est_T_list = best_params.T_list # Permute rows based on ω sorting
+        est_T_mat = hcat(est_T_list...)' 
+
+        # Compare sorted estimated params to sorted true params
+        # Use loose tolerances, especially for beta
+        hcat(est_η_sorted, true_η)
+        hcat(sort(est_η_θ), sort(true_η_θ))
+        hcat(est_ω_sorted, true_ω)
+
+
+        @test est_ω_sorted ≈ true_ω atol=0.1
+        @test est_η_sorted ≈ true_η atol=0.1
+        @test sort(est_η_θ) ≈ sort(true_η_θ) atol=0.1 # Check mixture weights
+
+        # Compare transition matrices (might need looser tol or element-wise)
+        # Note: True T matrix doesn't need sorting if states correspond to sorted ω
+        @test est_T_mat ≈ true_T_mat rtol=0.1
+
+
+
+        @test best_params.σ ≈ true_σ atol=0.05
+
+    end
+
+
     @testset "Mixture EM Convergence and Recovery" begin
         mixture_data = MixtureHMMData(y_rag, K, D)
         # Run EM using the parallel method dispatching on Type
-        n_inits_test = 500 # Use a small number for faster tests
+        n_inits_test = 20 # Use a small number for faster tests
         
 
-        best_params, results = run_em!(MixtureHMMParams, mixture_data; n_init=n_inits_test, maxiter=100, tol=1e-4, verbose=true);
+        best_params, results = run_em!(MixtureHMMParams, mixture_data; n_init=n_inits_test, maxiter=100, tol=1e-4, verbose=false);
         
         # Test the returned parameters
         @test best_params isa MixtureHMMParams{Float64}
@@ -101,21 +163,21 @@ import .TestUtils as SF
         est_η = sort(best_params.η_raw)
         hcat(est_ω, true_ω)
         hcat(est_η, true_η)
-        @test all(isapprox.(est_ω, true_ω, rtol=1e-1))
+        @test all(isapprox.(est_ω, true_ω, atol=0.1))
         @test all(isapprox.(est_η, true_η, rtol=1e-1))
 
         # Match estimated η_θ to true based on sorted η values
         sort_idx_est = sortperm(best_params.η_raw)
         # true_η is already sorted
         est_η_θ_sorted = best_params.η_θ[sort_idx_est]
-        @test sort(est_η_θ_sorted) ≈ sort(true_η_θ) atol=0.25
+        @test sort(est_η_θ_sorted) ≈ sort(true_η_θ) atol=0.1
 
         est_T_list = best_params.T_list
         for k in 1:K
-            @test est_T_list[k] ≈ true_T_list[k] rtol=0.3
+            @test est_T_list[k] ≈ true_T_list[k] rtol=0.1
         end
         
-        @test best_params.σ ≈ true_σ atol=0.1
+        @test best_params.σ ≈ true_σ atol=0.05
     end
 
 end # @testset MixtureHMM Tests 

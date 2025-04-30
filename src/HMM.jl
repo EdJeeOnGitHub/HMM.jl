@@ -22,7 +22,7 @@ include("algorithms/forward_backward.jl")
 # These might depend on algorithms/utils included above
 include("models/simple.jl")
 include("models/mixture.jl")
-# include("models/regression.jl") # Placeholder
+include("models/regression.jl") # Add include for regression model
 
 # EM algorithm steps (may depend on models and core algorithms)
 include("algorithms/em.jl") 
@@ -42,7 +42,9 @@ export e_step, m_step! # Export E/M steps if needed for debugging/advanced use
 
 # Add exports for Mixture, Regression, Parallel etc. when implemented
 export MixtureHMMData, MixtureHMMParams
-# export RegressionHMMData, RegressionHMMParams, run_mixture_regression_em!, ...
+export RegressionHMMData # Export new data type
+export RegressionHMMParams # Export new params type
+# export run_mixture_regression_em!, ...
 # export run_parallel_em
 
 

@@ -543,3 +543,265 @@ function run_em!(::Type{P}, data::D;
     
     return best_params, results
 end 
+
+
+# --- Regression HMM EM ---
+
+function e_step(params::RegressionHMMParams, data::RegressionHMMData)
+    (; y_rag, c_rag, k_rag, K, D, M) = data
+    (; η_raw, η_θ, ω, T_list, σ, beta, sigma_f) = params
+
+    T_mat = hcat(T_list...)'
+    π_s = stationary(T_mat)
+    ω_sorted = sort(ω)
+    η_sorted = sort(η_raw)
+
+    # Pre-compute polynomial features for all k values
+    poly_features = Array{Matrix{Float64}}(undef, length(k_rag))
+    for i in 1:length(k_rag)
+        k = k_rag[i]
+        poly_features[i] = hcat([k.^p for p in 0:M]...)
+    end
+
+    N = length(y_rag)
+    responsibilities = zeros(N, D)
+    γ_dict = Dict{Int, Matrix{Float64}}()
+    ξ_dict = Dict{Int, Array{Float64,3}}()
+
+    for i in 1:N
+        y_seq = y_rag[i]
+        T_len = length(y_seq)
+        c_seq = c_rag[i]
+        k_seq = k_rag[i]
+        
+        # Calculate responsibilities
+        lp_d = zeros(D)
+        for d in 1:D
+            # Compute polynomial predictions for each state
+            f_dik = [poly_features[i] * beta[d, k, :] for k in 1:K]
+            ω_d = ω_sorted .+ η_sorted[d]
+            logα_d = forward_logalpha_f(y_seq, c_seq, π_s, T_mat, ω_d, σ, f_dik, sigma_f)
+            lp_d[d] = logsumexp(logα_d[:, end])
+        end
+        unnorm = lp_d .+ log.(η_θ)
+        responsibilities[i, :] .= exp.(unnorm .- logsumexp(unnorm))
+
+        # Calculate γ and ξ for each mixture component
+        γ_total = zeros(K, T_len)
+        ξ_total = zeros(K, K, T_len-1)
+        
+        for d in 1:D
+            # Compute polynomial predictions for each state
+            f_dik = [poly_features[i] * beta[d, k, :] for k in 1:K]
+            ω_d = ω_sorted .+ η_sorted[d]
+            logα = forward_logalpha_f(y_seq, c_seq, π_s, T_mat, ω_d, σ, f_dik, sigma_f)
+            logβ = backward_logbeta_f(y_seq, c_seq, T_mat, ω_d, σ, f_dik, sigma_f)
+            
+            # Calculate γ
+            logγ = logα + logβ
+            for t in 1:T_len
+                logγ[:, t] .-= logsumexp(logγ[:, t])
+            end
+            γ_total .+= responsibilities[i,d] .* exp.(logγ)
+            
+            # Calculate ξ
+            for t in 1:(T_len-1)
+                for j in 1:K, k in 1:K
+                    ξ_total[j,k,t] += responsibilities[i,d] * exp(
+                        logα[j,t] + log(T_mat[j,k]) +
+                        logpdf(Normal(ω_d[k], σ), y_seq[t+1]) +
+                        logβ[k,t+1]
+                    )
+                end
+            end
+        end
+        
+        # Normalize ξ
+        for t in 1:(T_len-1)
+            ξ_total[:,:,t] ./= sum(ξ_total[:,:,t])
+        end
+        
+        γ_dict[i] = γ_total
+        ξ_dict[i] = ξ_total
+    end
+
+    return responsibilities, γ_dict, ξ_dict
+end
+
+
+function m_step!(
+    params::RegressionHMMParams,
+    data::RegressionHMMData,
+    responsibilities,
+    γ_dict,
+    ξ_dict
+)
+    (; y_rag, c_rag, k_rag, K, D, M) = data
+    (; η_raw, η_θ, ω, T_list, σ, beta, sigma_f) = params
+
+    T_mat = hcat(T_list...)'
+    π_s = stationary(T_mat)
+    N = length(y_rag)
+
+    # === Update η_θ ===
+    params.η_θ .= vec(sum(responsibilities, dims=1)) ./ N
+
+    # === Update transition matrix ===
+    T_counts = zeros(K, K)
+    for i in 1:N
+        ξ = ξ_dict[i]
+        for t in 1:size(ξ, 3)
+            T_counts .+= ξ[:,:,t]
+        end
+    end
+    for k in 1:K
+        params.T_list[k] .= T_counts[k,:] ./ sum(T_counts[k,:])
+    end
+
+    # === Update ω ===
+    ω_new = zeros(K)
+    ω_weight = zeros(K)
+
+    for i in 1:N
+        y_seq = y_rag[i]
+        γ = γ_dict[i]
+        for t in 1:length(y_seq)
+            for d in 1:D, k in 1:K
+                r = responsibilities[i,d]
+                ω_new[k] += r * γ[k,t] * (y_seq[t] - η_raw[d])
+                ω_weight[k] += r * γ[k,t]
+            end
+        end
+    end
+    params.ω .= ω_new ./ (ω_weight .+ 1e-8)
+    params.ω .= recentre_mu(params.ω, π_s)
+
+    # === Update η ===
+    η_new = zeros(D)
+    η_weight = zeros(D)
+    for i in 1:N
+        y_seq = y_rag[i]
+        γ = γ_dict[i]
+        for t in 1:length(y_seq)
+            for d in 1:D, k in 1:K
+                r = responsibilities[i,d]
+                η_new[d] += r * γ[k,t] * (y_seq[t] - params.ω[k])
+                η_weight[d] += r * γ[k,t]
+            end
+        end
+    end
+    params.η_raw .= η_new ./ (η_weight .+ 1e-8)
+
+    # === Update σ ===
+    σ_numer = 0.0
+    σ_denom = 0.0
+    for i in 1:N
+        y_seq = y_rag[i]
+        γ = γ_dict[i]
+        for t in 1:length(y_seq)
+            for d in 1:D, k in 1:K
+                r = responsibilities[i,d]
+                err = y_seq[t] - (params.ω[k] + params.η_raw[d])
+                σ_numer += r * γ[k,t] * err^2
+                σ_denom += r * γ[k,t]
+            end
+        end
+    end
+    params.σ = sqrt((σ_numer + 1e-6) / (σ_denom + 1e-8))
+
+    # === Update β and σ_f ===
+    σf_numer = 0.0
+    σf_denom = 0.0
+    for d in 1:D, k in 1:K
+        X = Float64[]
+        Y = Float64[]
+        W = Float64[]
+
+        for i in 1:N
+            γ = γ_dict[i]
+            r = responsibilities[i,d]
+            c = c_rag[i]
+            kvec = k_rag[i]
+
+            for t in 1:length(c)
+                w = r * γ[k, t]
+                if w > 1e-12  # skip near-zero weights
+                    push!(W, w)
+                    push!(Y, c[t])
+                    push!(X, [kvec[t]^m for m in 0:M]...)  # row-wise flatten
+                end
+            end
+        end
+
+        # Reshape into matrices
+        T_obs = length(W)
+        Xmat = reshape(X, M+1, T_obs)'  # T × (M+1)
+        Wvec = Diagonal(W)
+        Yvec = Y
+
+        XtWX = Xmat' * Wvec * Xmat
+        XtWY = Xmat' * Wvec * Yvec
+        params.beta[d, k, :] .= XtWX \ XtWY  # update β
+
+        residuals = Yvec .- Xmat * params.beta[d, k, :]
+        σf_numer += sum(W .* residuals.^2)
+        σf_denom += sum(W)
+    end
+
+    params.sigma_f = sqrt((σf_numer + 1e-6) / (σf_denom + 1e-8))
+
+    return params
+end
+
+
+
+"""
+    run_em!(params::RegressionHMMParams, data::RegressionHMMData; maxiter=50, tol=1e-4, verbose=true)
+
+Run the Expectation-Maximization algorithm for a Regression HMM.
+"""
+function run_em!(params::RegressionHMMParams, data::RegressionHMMData; maxiter=50, tol=1e-4, verbose=true)
+    try 
+        old_logp = logdensity(params, data)
+        if !isfinite(old_logp)
+            verbose && println("Initial parameters yield non-finite log density ($old_logp). Cannot start EM.")
+            return params # Return initial params
+        end
+
+        for iter in 1:maxiter
+            # Regression HMM E-step returns responsibilities as the first argument
+            r_nd, γ_dict, ξ_dict = e_step(params, data)
+            
+            # Regression HMM M-step requires responsibilities
+            m_step!(params, data, r_nd, γ_dict, ξ_dict)
+            
+            # Logdensity should dispatch correctly based on types
+            new_logp = logdensity(params, data)
+
+            if !isfinite(new_logp)
+                verbose && println("EM Iteration $iter: Log density became non-finite ($new_logp). Stopping.")
+                break 
+            end
+
+            if verbose
+                println("EM Iteration $iter (Regression): logp = $(round(new_logp, digits=4))")
+            end
+
+            # Check for convergence
+            if abs(new_logp - old_logp) < tol
+                verbose && println("Converged at iteration $iter.")
+                break
+            end
+            old_logp = new_logp
+
+            if iter == maxiter
+                verbose && println("Reached maximum iterations ($maxiter).")
+            end
+        end
+    catch e
+        println("Error during EM (Regression HMM): $e")
+        rethrow(e)
+    end
+    return params
+end
+

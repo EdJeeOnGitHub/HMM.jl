@@ -77,3 +77,84 @@ function backward_logbeta(y_seq, T_mat, ω, σ)
     end
     return logβ
 end 
+
+"""
+    forward_logalpha_f(y, π1, A, μ, σ)
+
+Run the log‑space Forward algorithm.
+
+# Arguments
+- `y  :: AbstractVector{T}`      : observations, length **T**
+- `π1 :: AbstractVector{T}`      : initial state probabilities, length **K**
+- `A  :: AbstractMatrix{T}`      : K×K transition matrix (rows sum to 1)
+- `μ  :: AbstractVector{T}`      : emission means, length **K**
+- `σ  :: AbstractVector{T}`      : emission std. devs., length **K**
+
+`T` can be `Float64`, `ForwardDiff.Dual`, `ReverseDiff.TrackedReal`, etc.
+
+f[K][T] 
+
+# Returns
+`logα :: Matrix{T}` of size **K × T**, where `logα[j, t] = log p(zₜ = j | y₁:ₜ)`.
+"""
+function forward_logalpha_f(y, c, π1, A, μ, σ, f, σ_f) 
+    Tval = promote_type(eltype(y), eltype(c), eltype(π1), eltype(A), eltype(μ), eltype(σ), eltype(f), eltype(σ_f))
+
+    K       = length(π1)
+    Tsteps  = length(y)
+    @assert size(A) == (K, K)
+    @assert length(μ) == K 
+
+    logα = Matrix{Tval}(undef, K, Tsteps)         # output
+    acc  = Vector{Tval}(undef, K)                 # workspace
+
+
+    log_A = log.(A)
+
+    # 1) Initialisation: log p(z₁=j) + log p(y₁ | z₁=j)
+    for j in 1:K
+        lpdf_c = _logpdf_normal(c[1], f[j][1], σ_f)
+        logα[j, 1] = log(π1[j]) + _logpdf_normal(y[1], μ[j], σ) + lpdf_c
+    end
+
+
+    # 2) Recursion
+    for t in 2:Tsteps
+        for j in 1:K
+            lpdf = _logpdf_normal(y[t], μ[j], σ)   # same for all i
+            lpdf_c = _logpdf_normal(c[t], f[j][t], σ_f)
+            for i in 1:K
+                acc[i] = logα[i, t-1] + log_A[i, j] + lpdf + lpdf_c
+            end
+            logα[j, t] = logsumexp(acc)               # stable ∑ in log‑space
+        end
+    end
+
+    return logα
+end
+
+function backward_logbeta_f(y, c, A, μ, σ, f, σ_f)
+    Tval = promote_type(eltype(y), eltype(c), eltype(A), eltype(μ), eltype(σ), eltype(f), eltype(σ_f))
+    K = size(A, 1)
+    T_len = length(y)
+    logβ = Matrix{Tval}(undef, K, T_len)
+
+    logβ[:, end] .= 0.0  # log(1)
+
+    log_A = log.(A)
+
+    for t = T_len - 1:-1:1
+        for i in 1:K
+            acc = Vector{Tval}(undef, K)
+            for j in 1:K
+                lpdf_y = _logpdf_normal(y[t+1], μ[j], σ)
+                lpdf_c = _logpdf_normal(c[t+1], f[j][t+1], σ_f)
+                acc[j] = log_A[i, j] + lpdf_y + lpdf_c + logβ[j, t+1]
+            end
+            logβ[i, t] = logsumexp(acc)
+        end
+    end
+
+    return logβ
+end
+
