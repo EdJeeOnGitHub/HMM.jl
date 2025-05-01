@@ -1,9 +1,4 @@
 # Defines structures for the Mixture HMM.
-# Assumes inclusion in main HMM module scope.
-
-# Dependencies (ComponentArrays) assumed loaded by main module.
-# Base types (AbstractHMMData, AbstractHMMParams) assumed available.
-
 
 # --- Data Structure ---
 """
@@ -35,32 +30,13 @@ Fields:
 - `T_list::Vector{Vector{T}}`: List of transition probability vectors (rows of transition matrix).
 - `σ::T`: Standard deviation of emission distributions (shared across states and mixtures).
 """
-struct MixtureHMMParams{T} <: AbstractHMMParams
-    # Using ComponentArray for easy access, mirrors plan fields
-    ca::ComponentArray{T}
+mutable struct MixtureHMMParams{T} <: AbstractHMMParams
+    η_raw::Vector{T}
+    η_θ::Vector{T}
+    ω::Vector{T}
+    T_list::Vector{Vector{T}}
+    σ::T
 end
-
-# Constructor to match the planned fields
-function MixtureHMMParams(; η_raw::Vector{T}, η_θ::Vector{T}, ω::Vector{T}, T_list::Vector{Vector{T}}, σ::T) where {T}
-    # Potential place to add validation
-    K = length(ω)
-    D = length(η_raw)
-    @assert length(η_θ) == D "Length of η_θ must match D=$D"
-    @assert sum(η_θ) ≈ 1.0 "Mixture probabilities η_θ must sum to 1"
-    @assert all(η_θ .>= 0) "Mixture probabilities η_θ must be non-negative"
-    @assert length(T_list) == K "T_list must have K=$K elements"
-    @assert all(length(row) == K for row in T_list) "Each row in T_list must have K=$K elements"
-    @assert all(sum(row) ≈ 1.0 for row in T_list) "Each row in T_list must sum to 1"
-    @assert σ > 0 "Standard deviation σ must be positive"
-
-    ca = ComponentArray(η_raw=η_raw, η_θ=η_θ, ω=ω, T_list=T_list, σ=σ)
-    return MixtureHMMParams{T}(ca)
-end
-
-# Allow accessing fields directly, e.g., params.ω
-Base.getproperty(p::MixtureHMMParams, s::Symbol) = getproperty(getfield(p, :ca), s)
-Base.setproperty!(p::MixtureHMMParams, s::Symbol, v) = setproperty!(getfield(p, :ca), s, v)
-Base.propertynames(p::MixtureHMMParams) = propertynames(getfield(p, :ca))
 
 # --- Random Initialization ---
 """
@@ -107,15 +83,8 @@ function initialize_params(::Type{MixtureHMMParams}, seed::Int, data::MixtureHMM
     # Initialize standard deviation (ensure positivity)
     σ = abs(randn(T)) + T(0.1)
 
-    # Create ComponentArray and wrap in the struct
-    ca = ComponentArray(
-        η_raw = η_raw,
-        η_θ = η_θ,
-        ω = ω,
-        T_list = T_list,
-        σ = σ
-    )
-    return MixtureHMMParams{T}(ca)
+    # Directly construct the mutable struct
+    return MixtureHMMParams{T}(η_raw, η_θ, ω, T_list, σ)
 end
 
 # --- Logdensity ---

@@ -1,6 +1,6 @@
 using HMM # Use the main module
 using Test
-using Random, Distributions, ComponentArrays, LinearAlgebra
+using Random, Distributions, LinearAlgebra
 # using DataFrames # Optional: Keep if you want to use tidy_sim_data for comparisons
 
 # Include simulation functions (assuming they are in test_utils.jl)

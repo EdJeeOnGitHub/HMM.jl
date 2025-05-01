@@ -1,12 +1,5 @@
 # This file defines structures and functions for the Simple HMM
-# It assumes it's included into the main HmmEM module scope.
 
-# Dependencies like Random, Distributions, ComponentArrays, logsumexp
-# should be imported in the main HmmEM.jl file.
-# Base types like AbstractHMMData, AbstractHMMParams should be available
-# because models/base.jl is included before this file.
-# Functions like forward_logalpha, stationary should be available
-# because the algorithm/util files are included before this file.
 
 
 # --- Data Structure ---
@@ -35,28 +28,11 @@ Fields:
 - `T_list::Vector{Vector{T}}`: List of transition probability vectors (rows of transition matrix).
 - `σ::T`: Standard deviation of emission distributions (shared across states).
 """
-struct SimpleHMMParams{T} <: AbstractHMMParams
-    # Using ComponentArray for now for easy access, matches plan fields
-    ca::ComponentArray{T}
+mutable struct SimpleHMMParams{T} <: AbstractHMMParams
+    ω::Vector{T}
+    T_list::Vector{Vector{T}}
+    σ::T
 end
-
-# Constructor to match the planned fields
-function SimpleHMMParams(; ω::Vector{T}, T_list::Vector{Vector{T}}, σ::T) where {T}
-    # Potential place to add validation
-    K = length(ω)
-    @assert length(T_list) == K "T_list must have K=$K elements"
-    @assert all(length(row) == K for row in T_list) "Each row in T_list must have K=$K elements"
-    @assert all(sum(row) ≈ 1.0 for row in T_list) "Each row in T_list must sum to 1"
-    @assert σ > 0 "Standard deviation σ must be positive"
-
-    ca = ComponentArray(ω = ω, T_list = T_list, σ = σ)
-    return SimpleHMMParams{T}(ca)
-end
-
-# Allow accessing fields directly, e.g., params.ω
-Base.getproperty(p::SimpleHMMParams, s::Symbol) = getproperty(getfield(p, :ca), s)
-Base.setproperty!(p::SimpleHMMParams, s::Symbol, v) = setproperty!(getfield(p, :ca), s, v)
-Base.propertynames(p::SimpleHMMParams) = propertynames(getfield(p, :ca))
 
 # --- Logdensity ---
 """
@@ -104,11 +80,9 @@ Initialize parameters for a SimpleHMM randomly.
 function initialize_params(::Type{SimpleHMMParams}, seed::Int, data::SimpleHMMData{T}) where {T}
     Random.seed!(seed)
     K = data.K
-    # Create ComponentArray first, then wrap in SimpleHMMParams
-    ca = ComponentArray( 
-        ω = randn(T, K),
-        T_list = [rand(Dirichlet(ones(T, K) / K)) for _ in 1:K],
-        σ = abs(randn(T)) + T(0.1) # Ensure positivity and match type T
-    )
-    return SimpleHMMParams{T}(ca)
+    # Directly construct the mutable struct
+    ω_init = randn(T, K)
+    T_list_init = [rand(Dirichlet(ones(T, K) / K)) for _ in 1:K]
+    σ_init = abs(randn(T)) + T(0.1) # Ensure positivity and match type T
+    return SimpleHMMParams{T}(ω_init, T_list_init, σ_init)
 end 

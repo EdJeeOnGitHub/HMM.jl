@@ -1,6 +1,6 @@
 using HMM # Use the main module
 using Test
-using Random, Distributions, ComponentArrays, LinearAlgebra
+using Random, Distributions, LinearAlgebra
 using StatsBase
 
 # Include simulation functions
@@ -88,13 +88,11 @@ import .TestUtils as SF
     @testset "Mixture EM Convergence and Recovery - near optimum" begin
         # Run EM using the parallel method dispatching on Type
         true_params  = MixtureHMMParams(
-            ComponentArray(
-                ω = true_ω,
-                η_raw = true_η,
-                η_θ = true_η_θ,
-                T_list = true_T_list,
-                σ = true_σ
-            )
+                true_η,
+                true_η_θ,
+                true_ω,
+                true_T_list,
+                true_σ
         )
         mixture_data = MixtureHMMData(y_rag, K, D)
         initial_params = initialize_params(MixtureHMMParams, SEED+1, mixture_data)

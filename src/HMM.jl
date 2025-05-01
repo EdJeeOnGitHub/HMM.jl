@@ -1,7 +1,7 @@
 module HMM
 
 # Core Dependencies
-using Random, LinearAlgebra, Distributions, ComponentArrays, StatsBase
+using Random, LinearAlgebra, Distributions, StatsBase
 using LogExpFunctions: logsumexp
 using Base.Threads # Added for parallel EM
 
@@ -12,6 +12,7 @@ export AbstractHMMData, AbstractHMMParams, AbstractHMMModel
 
 # Utilities needed by algorithms and models
 include("utils/helpers.jl")
+include("utils/basis.jl") # Add include for basis functions
 # include("utils/distributions.jl") # Placeholder
 
 # Core algorithms needed by models/EM steps
@@ -42,8 +43,9 @@ export e_step, m_step! # Export E/M steps if needed for debugging/advanced use
 
 # Add exports for Mixture, Regression, Parallel etc. when implemented
 export MixtureHMMData, MixtureHMMParams
-export RegressionHMMData # Export new data type
+export RegressionHMMData # Export data type
 export RegressionHMMParams # Export new params type
+export bernstein_basis # Export basis function
 # export run_mixture_regression_em!, ...
 # export run_parallel_em
 

@@ -16,49 +16,44 @@ Data structure for a Regression Hidden Markov Model with an auxiliary regression
 # Fields
 - `y_rag::Vector{Vector{T}}`: Ragged array of primary observation sequences.
 - `c_rag::Vector{Vector{T}}`: Ragged array of auxiliary regression target sequences.
-- `x_rag::Vector{Vector{T}}`: Ragged array of 1D covariate sequences (input for polynomial regression).
+- `Φ_rag::Vector{Matrix{T}}`: Ragged array of basis matrices for each sequence.
+- `D::Int`: Number of mixture components.
 - `K::Int`: Number of hidden states.
-- `M::Int`: Degree of the polynomial regression (determines number of coefficients needed).
+- `P::Int`: Number of basis functions (columns in Φ_rag[i]).
 """
 struct RegressionHMMData{T} <: AbstractHMMData
     y_rag::Vector{Vector{T}}
     c_rag::Vector{Vector{T}} # Added auxiliary target
-    k_rag::Vector{Vector{T}} # Simplified covariate input (1D)
+    Φ_rag::Vector{Matrix{T}} # Basis matrix for each sequence
     D::Int # Number of mixture components
     K::Int # Number of hidden states
-    M::Int # Changed from P to M (Polynomial Degree)
+    P::Int # Number of basis functions (columns in Φ_rag[i])
 end 
 
 """
     RegressionHMMParams{T} <: AbstractHMMParams
 
 Parameter structure for a Regression Hidden Markov Model with mixture components 
-and auxiliary regression, stored within a ComponentArray.
+and auxiliary regression.
 
 # Fields
-- `ca::ComponentArray{T}`: Stores the model parameters accessible via keys:
-    - `:η_raw`: Vector{T}, mixture component locations.
-    - `:η_θ`: Vector{T}, mixture component weights.
-    - `:ω`: Vector{T}, base emission means for `y`, length `K`.
-    - `:T_list`: Vector{Vector{T}}, transition probability vectors.
-    - `:σ`: T, standard deviation for `y` emissions.
-    - `:β`: Matrix{T}, regression coefficients for `c` ~ poly(`x`), size `D x K x (M+1)`.
-    - `:σ_f`: T, standard deviation for the auxiliary regression `c`.
+- `η_raw::Vector{T}`: Vector{T}, mixture component locations.
+- `η_θ::Vector{T}`: Vector{T}, mixture component weights.
+- `ω::Vector{T}`: Vector{T}, base emission means for `y`, length `K`.
+- `T_list::Vector{Vector{T}}`: Vector{Vector{T}}, transition probability vectors.
+- `σ::T`: T, standard deviation for `y` emissions.
+- `beta::Array{T,3}`: Array{T,3}, regression coefficients for `c` ~ `Φ*β`, size `D x K x P`.
+- `sigma_f::T`: T, standard deviation for the auxiliary regression `c`.
 """
-struct RegressionHMMParams{T} <: AbstractHMMParams
-    ca::ComponentArray{T}
+mutable struct RegressionHMMParams{T} <: AbstractHMMParams
+    η_raw::Vector{T}
+    η_θ::Vector{T}
+    ω::Vector{T}
+    T_list::Vector{Vector{T}}
+    σ::T
+    beta::Array{T,3}  # Regression coefficients, size D x K x P
+    sigma_f::T
 end 
-
-
-function RegressionHMMParams(; η_raw::Vector{T}, η_θ::Vector{T}, ω::Vector{T}, T_list::Vector{Vector{T}}, σ::T, beta::Matrix{T}, sigma_f::T) where {T}
-    ca = ComponentArray(η_raw = η_raw, η_θ = η_θ, ω=ω, T_list=T_list, σ=σ, beta=beta, sigma_f=sigma_f)
-    return RegressionHMMParams{T}(ca)
-end
-
-# Allow accessing fields directly, e.g., params.ω
-Base.getproperty(p::RegressionHMMParams, s::Symbol) = getproperty(getfield(p, :ca), s)
-Base.setproperty!(p::RegressionHMMParams, s::Symbol, v) = setproperty!(getfield(p, :ca), s, v)
-Base.propertynames(p::RegressionHMMParams) = propertynames(getfield(p, :ca))
 
 
 """
@@ -78,7 +73,7 @@ function initialize_params(::Type{RegressionHMMParams}, seed::Int, data::Regress
     Random.seed!(seed)
     K = data.K
     D = data.D
-    M = data.M
+    P = data.P
     
     # Get min and max of all observations
     y_min = minimum(minimum(y) for y in data.y_rag)
@@ -97,28 +92,39 @@ function initialize_params(::Type{RegressionHMMParams}, seed::Int, data::Regress
 
 
     c_vec = reduce(vcat, data.c_rag)
-    k_vec = reduce(vcat, data.k_rag)
+    Φ_all = reduce(vcat, data.Φ_rag) # Concatenate all basis matrices
     
     # Initialize beta coefficients for polynomial regression
     # add random noise to break symmetry
-    beta = zeros(D, K, M+1)
+    beta = zeros(T, D, K, P) # Ensure type T
     for d in 1:D, k in 1:K
-        X = hcat([k_vec.^p for p in 0:M]...)
-        Y = c_vec
-        β = X \ Y
-        beta[d, k, :] = β + randn(M+1) * 0.1
+        # Perform least squares on the concatenated data
+        X = Φ_all 
+        Y = c_vec 
+        # Ensure X and Y have compatible dimensions before solving
+        if size(X, 1) == length(Y)
+            β = X \ Y
+            # Ensure β has the correct length P before assignment
+            if length(β) == P
+                beta[d, k, :] = β .+ randn(T, P) .* T(0.1) # Add typed noise
+            else
+                println("Warning: Least squares solution for beta[$d, $k, :] has length $(length(β)), expected $P. Initializing with noise.")
+                beta[d, k, :] = randn(T, P) .* T(0.1)
+            end
+        else
+            println("Warning: Mismatched dimensions for least squares initialization of beta[$d, $k, :]. Size(X)=$(size(X)), Length(Y)=$(length(Y)). Initializing with noise.")
+            beta[d, k, :] = randn(T, P) .* T(0.1) # Fallback: Initialize with noise
+        end
     end
 
-    ca = ComponentArray(
-    η_raw = η_raw,
-        η_θ = rand(Dirichlet(ones(D) / D)),
-        ω = ω,
-        T_list = [rand(Dirichlet(ones(K) / K)) for _ in 1:K],
-        σ = abs(randn()) + 0.1,
-        beta = beta,
-        sigma_f = abs(randn()) + 0.1
-        )
-    return RegressionHMMParams{T}(ca)
+    # Initialize remaining parameters
+    η_θ_init = rand(Dirichlet(ones(T, D) / D))
+    T_list_init = [rand(Dirichlet(ones(T, K) / K)) for _ in 1:K]
+    σ_init = abs(randn(T)) + T(0.1)
+    sigma_f_init = abs(randn(T)) + T(0.1)
+
+    # Construct the mutable struct directly
+    return RegressionHMMParams{T}(η_raw, η_θ_init, ω, T_list_init, σ_init, beta, sigma_f_init)
 end 
 
 """
@@ -135,7 +141,7 @@ with auxiliary regression, adapted from `logdensity_mixture_regression`.
 - `Float64`: The total log density.
 """
 function logdensity(params::RegressionHMMParams{T}, data::RegressionHMMData{T}) where {T}
-    (; y_rag, c_rag, k_rag, K, D, M) = data
+    (; y_rag, c_rag, Φ_rag, K, D, P) = data
     (; η_raw, η_θ, ω, T_list, σ, beta, sigma_f) = params
 
     T_mat = hcat(T_list...)'
@@ -167,15 +173,12 @@ function logdensity(params::RegressionHMMParams{T}, data::RegressionHMMData{T}) 
     for i in 1:N
         y_seq = y_rag[i]
         c_seq = c_rag[i]
-        k_seq = k_rag[i]
-
-        # Precompute polynomial features
-        Φ = hcat([k_seq.^p for p in 0:M]...)  # T × (M+1)
 
         lp_d = zeros(eltype(ω), D)
         for d in 1:D
-            # Compute regression mean f_dik for all k and t
-            f_dik = [Φ * beta[d, k, :] for k in 1:K]
+            # Compute regression mean f_dik for all k and t for the current sequence i
+            current_Φ = Φ_rag[i] # Basis matrix for sequence i
+            f_dik = [current_Φ * beta[d, k, :] for k in 1:K]
             ω_d = ω_sorted .+ η_sorted[d]
 
             logα_d = forward_logalpha_f(y_seq, c_seq, π_s, T_mat, ω_d, σ, f_dik, sigma_f)

@@ -548,20 +548,14 @@ end
 # --- Regression HMM EM ---
 
 function e_step(params::RegressionHMMParams, data::RegressionHMMData)
-    (; y_rag, c_rag, k_rag, K, D, M) = data
+    # Unpack data fields (using Φ_rag and P now)
+    (; y_rag, c_rag, Φ_rag, K, D, P) = data
     (; η_raw, η_θ, ω, T_list, σ, beta, sigma_f) = params
 
     T_mat = hcat(T_list...)'
     π_s = stationary(T_mat)
     ω_sorted = sort(ω)
     η_sorted = sort(η_raw)
-
-    # Pre-compute polynomial features for all k values
-    poly_features = Array{Matrix{Float64}}(undef, length(k_rag))
-    for i in 1:length(k_rag)
-        k = k_rag[i]
-        poly_features[i] = hcat([k.^p for p in 0:M]...)
-    end
 
     N = length(y_rag)
     responsibilities = zeros(N, D)
@@ -572,13 +566,20 @@ function e_step(params::RegressionHMMParams, data::RegressionHMMData)
         y_seq = y_rag[i]
         T_len = length(y_seq)
         c_seq = c_rag[i]
-        k_seq = k_rag[i]
+        Φ_seq = Φ_rag[i] # Get the basis matrix for this sequence
+
+        # Basic check for sequence length consistency
+        @assert length(c_seq) == T_len "Length mismatch between y_seq and c_seq for sequence $i"
+        @assert size(Φ_seq, 1) == T_len "Row count mismatch between Φ_seq and y_seq for sequence $i"
+
+        if T_len == 0 continue end # Skip empty sequences
         
         # Calculate responsibilities
         lp_d = zeros(D)
         for d in 1:D
-            # Compute polynomial predictions for each state
-            f_dik = [poly_features[i] * beta[d, k, :] for k in 1:K]
+            # Compute regression mean using the basis matrix for this sequence
+            # f_dik[k] will be a vector of length T_len
+            f_dik = [Φ_seq * beta[d, k, :] for k in 1:K]
             ω_d = ω_sorted .+ η_sorted[d]
             logα_d = forward_logalpha_f(y_seq, c_seq, π_s, T_mat, ω_d, σ, f_dik, sigma_f)
             lp_d[d] = logsumexp(logα_d[:, end])
@@ -591,8 +592,8 @@ function e_step(params::RegressionHMMParams, data::RegressionHMMData)
         ξ_total = zeros(K, K, T_len-1)
         
         for d in 1:D
-            # Compute polynomial predictions for each state
-            f_dik = [poly_features[i] * beta[d, k, :] for k in 1:K]
+            # Compute regression mean using the basis matrix for this sequence
+            f_dik = [Φ_seq * beta[d, k, :] for k in 1:K] # Recompute or pass from above?
             ω_d = ω_sorted .+ η_sorted[d]
             logα = forward_logalpha_f(y_seq, c_seq, π_s, T_mat, ω_d, σ, f_dik, sigma_f)
             logβ = backward_logbeta_f(y_seq, c_seq, T_mat, ω_d, σ, f_dik, sigma_f)
@@ -636,7 +637,7 @@ function m_step!(
     γ_dict,
     ξ_dict
 )
-    (; y_rag, c_rag, k_rag, K, D, M) = data
+    (; y_rag, c_rag, Φ_rag, K, D, P) = data
     (; η_raw, η_θ, ω, T_list, σ, beta, sigma_f) = params
 
     T_mat = hcat(T_list...)'
@@ -721,27 +722,34 @@ function m_step!(
             γ = γ_dict[i]
             r = responsibilities[i,d]
             c = c_rag[i]
-            kvec = k_rag[i]
+            Φ = Φ_rag[i]
 
             for t in 1:length(c)
                 w = r * γ[k, t]
                 if w > 1e-12  # skip near-zero weights
                     push!(W, w)
                     push!(Y, c[t])
-                    push!(X, [kvec[t]^m for m in 0:M]...)  # row-wise flatten
+                    push!(X, Φ[t,:]...)  # row-wise flatten
                 end
             end
         end
 
         # Reshape into matrices
         T_obs = length(W)
-        Xmat = reshape(X, M+1, T_obs)'  # T × (M+1)
+        Xmat = reshape(X, P, T_obs)'  # T × P
         Wvec = Diagonal(W)
         Yvec = Y
 
         XtWX = Xmat' * Wvec * Xmat
         XtWY = Xmat' * Wvec * Yvec
-        params.beta[d, k, :] .= XtWX \ XtWY  # update β
+
+        # Add ridge penalty for stability
+        T = eltype(XtWX) # Get type for lambda and I
+        lambda = T(1e-6) # Small ridge penalty
+        I_P = Diagonal(ones(T, P)) # Identity matrix of size PxP
+
+        # Solve the regularized system
+        params.beta[d, k, :] .= (XtWX + lambda * I_P) \ XtWY  # update β with ridge
 
         residuals = Yvec .- Xmat * params.beta[d, k, :]
         σf_numer += sum(W .* residuals.^2)
