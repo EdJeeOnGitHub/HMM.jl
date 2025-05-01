@@ -1,0 +1,34 @@
+name: Benchmark
+
+on:
+  push:
+    branches:
+      - main # Or your default branch
+  pull_request:
+    branches:
+      - main # Run on PRs targeting main
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Julia
+        uses: julia-actions/setup-julia@v1
+        with:
+          version: '1' # Specify your Julia version
+
+      - name: Install dependencies
+        run: julia --project=benchmark -e 'using Pkg; Pkg.instantiate()'
+
+      - name: Run benchmarks
+        # Run with threads for parallel tests (adjust if needed)
+        run: julia -t auto --project=benchmark benchmark/benchmarks.jl
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark/benchmark_results.json 
