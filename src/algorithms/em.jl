@@ -360,11 +360,11 @@ end
 
 # --- Run EM ---
 """
-    run_em!(params::SimpleHMMParams, data::SimpleHMMData; maxiter=50, tol=1e-4, verbose=true)
+    run_em!(params::SimpleHMMParams, data::SimpleHMMData; maxiter=50, tol=1e-4, verbose=false)
 
 Run the Expectation-Maximization algorithm for a Simple HMM.
 """
-function run_em!(params::SimpleHMMParams, data::SimpleHMMData; maxiter=50, tol=1e-4, verbose=true)
+function run_em!(params::SimpleHMMParams, data::SimpleHMMData; maxiter=50, tol=1e-4, verbose=false)
     # Use logdensity function directly (should be in scope)
     # Note: logdensity includes priors. For pure ML EM, might need a likelihood func.
     try 

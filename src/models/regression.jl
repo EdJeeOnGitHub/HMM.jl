@@ -127,6 +127,39 @@ function initialize_params(::Type{RegressionHMMParams}, seed::Int, data::Regress
     return RegressionHMMParams{T}(η_raw, η_θ_init, ω, T_list_init, σ_init, beta, sigma_f_init)
 end 
 
+# Initialize by running the mixture version first, then adding the regression parameters
+function initialize_params(::Type{RegressionHMMParams}, seed::Int, data::RegressionHMMData, n_tries::Int)
+    mix_data = MixtureHMMData(data.y_rag, data.D, data.K)
+    mix_params = initialize_params(MixtureHMMParams, seed, mix_data)
+    best_mix_params = run_em!(mix_params, mix_data, maxiter = 5)
+    best_mix_logp = logdensity(best_mix_params, mix_data)
+    if !isfinite(best_mix_logp)
+        best_mix_logp = -Inf
+    end
+    for i in 1:n_tries
+        mix_params = initialize_params(MixtureHMMParams, seed+i, mix_data)
+        mix_params = run_em!(mix_params, mix_data, maxiter = 5)
+        mix_logp = logdensity(mix_params, mix_data)
+        if isfinite(mix_logp)
+            if mix_logp > best_mix_logp
+                best_mix_params = mix_params
+                best_mix_logp = mix_logp
+            end
+        end
+    end
+    best_reg_params = initialize_params(RegressionHMMParams, seed, data)
+    best_reg_params.η_raw = best_mix_params.η_raw
+    best_reg_params.η_θ = best_mix_params.η_θ
+    best_reg_params.ω = best_mix_params.ω
+    best_reg_params.T_list = best_mix_params.T_list
+    best_reg_params.σ = best_mix_params.σ
+
+    best_reg_params = run_em!(best_reg_params, data, maxiter = 1)
+
+    return best_reg_params
+end
+
+
 """
     logdensity(params::RegressionHMMParams, data::RegressionHMMData)
 
