@@ -411,11 +411,11 @@ function run_em!(params::SimpleHMMParams, data::SimpleHMMData; maxiter=50, tol=1
 end
 
 """
-    run_em!(params::MixtureHMMParams, data::MixtureHMMData; maxiter=50, tol=1e-4, verbose=true)
+    run_em!(params::MixtureHMMParams, data::MixtureHMMData; maxiter=50, tol=1e-4, verbose=false)
 
 Run the Expectation-Maximization algorithm for a Mixture HMM.
 """
-function run_em!(params::MixtureHMMParams, data::MixtureHMMData; maxiter=50, tol=1e-4, verbose=true)
+function run_em!(params::MixtureHMMParams, data::MixtureHMMData; maxiter=50, tol=1e-4, verbose=false)
     try 
         old_logp = logdensity(params, data)
         if !isfinite(old_logp)
@@ -476,7 +476,7 @@ Selects the best result based on the final log-density (likelihood + priors).
 - `n_init::Int=50`: Number of random initializations to run.
 - `maxiter::Int=100`: Maximum EM iterations for each run.
 - `tol::Float64=1e-4`: Convergence tolerance for each run.
-- `verbose::Bool=true`: Whether to print progress for the overall parallel run (individual runs are silent).
+- `verbose::Bool=false`: Whether to print progress for the overall parallel run (individual runs are silent).
 
 # Returns
 - `best_params::P`: The parameter set corresponding to the highest log-density found.
@@ -485,7 +485,7 @@ function run_em!(::Type{P}, data::D;
                  n_init=50, 
                  maxiter=100, 
                  tol=1e-4, 
-                 verbose=true, # Default verbose to true for parallel runner
+                 verbose=false, # Default verbose to true for parallel runner
                  n_init_tries=10
                  ) where {P<:AbstractHMMParams, D<:AbstractHMMData}
     

@@ -154,7 +154,10 @@ function initialize_params(::Type{RegressionHMMParams}, seed::Int, data::Regress
     best_reg_params.T_list = best_mix_params.T_list
     best_reg_params.σ = best_mix_params.σ
 
-    best_reg_params = run_em!(best_reg_params, data, maxiter = 1)
+    # perform E step ignoring the regression params
+    r_nd, γ_dict, ξ_dict = e_step(best_mix_params, mix_data)
+    # update the regression parameters using the mixture responsibilities
+    m_step!(best_reg_params, data, r_nd, γ_dict, ξ_dict)
 
     return best_reg_params
 end
