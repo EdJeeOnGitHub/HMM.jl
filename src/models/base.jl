@@ -24,3 +24,23 @@ abstract type AbstractHMMModel end
 # Define common interface functions here later, e.g.:
 # function n_states(model::AbstractHMMModel) end
 # function n_sequences(data::AbstractHMMData) end 
+
+
+function initialize_params(::Type{P}, seed::Int, data::D, n_tries::Int) where {P<:AbstractHMMParams, D<:AbstractHMMData}
+    best_params = initialize_params(P, seed, data)
+    best_logp = logdensity(best_params, data)
+    if !isfinite(best_logp)
+        best_logp = -Inf
+    end
+    for i in 1:n_tries
+        params = initialize_params(P, seed+i, data)
+        logp = logdensity(params, data)
+        if isfinite(logp)
+            if logp > best_logp
+                best_params = params
+                best_logp = logp
+            end
+        end
+    end
+    return best_params
+end

@@ -485,7 +485,8 @@ function run_em!(::Type{P}, data::D;
                  n_init=50, 
                  maxiter=100, 
                  tol=1e-4, 
-                 verbose=true # Default verbose to true for parallel runner
+                 verbose=true, # Default verbose to true for parallel runner
+                 n_init_tries=10
                  ) where {P<:AbstractHMMParams, D<:AbstractHMMData}
     
     # Infer type T for storing results (assuming data.y_rag exists and is not empty)
@@ -505,7 +506,7 @@ function run_em!(::Type{P}, data::D;
     verbose && println("Starting $n_init EM initializations using $n_threads threads...")
 
     Threads.@threads for i in 1:n_init
-        local_params = initialize_params(P, i, data)
+        local_params = initialize_params(P, i, data, n_init_tries)
         try 
             run_em!(local_params, data; maxiter=maxiter, tol=tol, verbose=verbose)
             logp = logdensity(local_params, data)
@@ -659,7 +660,7 @@ function m_step!(
         params.T_list[k] .= T_counts[k,:] ./ sum(T_counts[k,:])
     end
 
-    # === Update ω ===
+    # === Update ω and η ===
     ω_new = zeros(K)
     ω_weight = zeros(K)
 
@@ -677,7 +678,6 @@ function m_step!(
     params.ω .= ω_new ./ (ω_weight .+ 1e-8)
     params.ω .= recentre_mu(params.ω, π_s)
 
-    # === Update η ===
     η_new = zeros(D)
     η_weight = zeros(D)
     for i in 1:N
