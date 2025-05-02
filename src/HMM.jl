@@ -46,6 +46,8 @@ export MixtureHMMData, MixtureHMMParams
 export RegressionHMMData # Export data type
 export RegressionHMMParams # Export new params type
 export bernstein_basis # Export basis function
+export monomial_basis # Export basis function
+export hermite_basis # Export basis function
 # export run_mixture_regression_em!, ...
 # export run_parallel_em
 

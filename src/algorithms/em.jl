@@ -464,7 +464,7 @@ end
 # Need to import Base.Threads in the main HMM module
 
 """
-    run_em!(::Type{P}, data::D; n_init=50, maxiter=100, tol=1e-4, verbose=true) where {P<:AbstractHMMParams, D<:AbstractHMMData}
+    run_em!(::Type{P}, data::D; n_init=50, maxiter=100, tol=1e-4, verbose=false) where {P<:AbstractHMMParams, D<:AbstractHMMData}
 
 Run the Expectation-Maximization algorithm with multiple random initializations in parallel.
 
@@ -476,7 +476,7 @@ Selects the best result based on the final log-density (likelihood + priors).
 - `n_init::Int=50`: Number of random initializations to run.
 - `maxiter::Int=100`: Maximum EM iterations for each run.
 - `tol::Float64=1e-4`: Convergence tolerance for each run.
-- `verbose::Bool=false`: Whether to print progress for the overall parallel run (individual runs are silent).
+- `verbose::Bool=true`: Whether to print progress for the overall parallel run (individual runs are silent).
 
 # Returns
 - `best_params::P`: The parameter set corresponding to the highest log-density found.
@@ -764,11 +764,11 @@ end
 
 
 """
-    run_em!(params::RegressionHMMParams, data::RegressionHMMData; maxiter=50, tol=1e-4, verbose=true)
+    run_em!(params::RegressionHMMParams, data::RegressionHMMData; maxiter=50, tol=1e-4, verbose=false)
 
 Run the Expectation-Maximization algorithm for a Regression HMM.
 """
-function run_em!(params::RegressionHMMParams, data::RegressionHMMData; maxiter=50, tol=1e-4, verbose=true)
+function run_em!(params::RegressionHMMParams, data::RegressionHMMData; maxiter=50, tol=1e-4, verbose=false)
     try 
         old_logp = logdensity(params, data)
         if !isfinite(old_logp)

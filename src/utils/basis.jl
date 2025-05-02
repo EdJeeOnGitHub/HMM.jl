@@ -41,3 +41,37 @@ function bernstein_basis(x::AbstractVector{T}, degree::Int, min_val::T, max_val:
 
     return Φ
 end 
+
+function monomial_basis(x::AbstractVector{T}, degree::Int) where T<:Real
+    n = length(x)
+    P = degree + 1
+    Φ = Matrix{T}(undef, n, P)
+
+    for i in 1:n
+        xi = x[i]
+        for p in 0:degree
+            Φ[i, p+1] = xi^p
+        end
+    end
+
+    return Φ
+end
+
+function hermite_basis(x::AbstractVector{T}, degree::Int) where T<:Real
+    n = length(x)
+    P = degree + 1
+    Φ = Matrix{T}(undef, n, P)
+
+    for i in 1:n
+        xi = x[i]
+        Φ[i, 1] = one(T)               # H₀(x) = 1
+        if degree >= 1
+            Φ[i, 2] = 2 * xi           # H₁(x) = 2x
+        end
+        for p in 2:degree
+            Φ[i, p+1] = 2 * xi * Φ[i, p] - 2 * (p - 1) * Φ[i, p-1]
+        end
+    end
+
+    return Φ
+end
