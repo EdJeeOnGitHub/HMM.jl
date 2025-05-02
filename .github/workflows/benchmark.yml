@@ -25,7 +25,7 @@ jobs:
 
       - name: Run benchmarks
         # Run with threads for parallel tests (adjust if needed)
-        run: julia -t auto --project=benchmark benchmark/benchmarks.jl
+        run: julia -t auto --project=. benchmark/benchmarks.jl
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
