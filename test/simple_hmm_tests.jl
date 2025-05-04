@@ -12,14 +12,21 @@ K = 3
 T = 2
 N = 500
 
+# Define params specifically for this initial data generation
+simple_test_params = SF.HMMRegressionSimulationParams(
+    K = K,
+    eta_dist = Normal(0, 0.0) # Override eta_sd=0
+)
+
 test_data = SF.hmm_generate_multiple_eta_reg(
-    seed = 1, K = K, T = T, N = N, D = 1, J = 1, mu_sd = 4.0, eta_sd = 0.0
+    seed = 1, K = K, T_max = T, N = N, D = 1, J = 1, 
+    params = simple_test_params # Pass the custom params
 );
 
 y = test_data.y
 T = test_data.T
 y_rag, t_rag = SF.create_ragged_vector(y, T)
-k_rag, _ = SF.create_ragged_vector(test_data.k_data, T)
+k_rag, _ = SF.create_ragged_vector(test_data.k, T)
 c_rag, _ = SF.create_ragged_vector(test_data.c, T)
 
 
@@ -29,13 +36,20 @@ c_rag, _ = SF.create_ragged_vector(test_data.c, T)
 
     # --- Common Data Simulation Setup for all tests in this set ---
     K = 3
-    N = 50 # Smaller N for faster tests
-    T = 10
+    N = 1000 # Smaller N for faster tests
+    T = 20
     SEED = 1
 
+    # Define params for the main simulation within the testset
+    sim_params = SF.HMMRegressionSimulationParams(
+        K = K,
+        eta_dist = Normal(0, 0.0), # Override eta_sd=0
+        T_range = (2, T) # Ensure max T matches the T variable here
+    )
+
     sim = SF.hmm_generate_multiple_eta_reg(
-        seed = SEED, K = K, T = T, N = N, D = 1, J = 1, 
-        mu_sd = 4.0, eta_sd = 0.0 
+        seed = SEED, K = K, T_max = T, N = N, D = 1, J = 1, 
+        params = sim_params # Pass the custom params
     );
     
     y_rag, t_rag = SF.create_ragged_vector(sim.y, sim.T) # Use sim.T which is T_lengths

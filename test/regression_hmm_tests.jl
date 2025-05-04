@@ -7,13 +7,47 @@ using StatsBase
 include("test_utils.jl") 
 import .TestUtils as SF
 
+
+    function generate_f(f, params, x)
+        P = size(params.beta, 3) # Get P from params
+        basis_features = f(x, P-1) # Use some fn
+        D = size(params.η_raw, 1)
+        K = size(params.ω, 1)
+        predictions = Array{Float64}(undef, K, D, length(x))
+        for d in 1:D
+            for k in 1:K
+                predictions[k, d, :] = basis_features * params.beta[d, k, :]
+            end
+        end
+        return predictions
+    end
+
+    function generate_true_fn(true_params, x)
+        D = size(true_params.η, 1)
+        K = size(true_params.μ, 1)
+        true_fn = Array{Float64}(undef, K, D, length(x))
+        η_sorted = sort(true_params.η)
+        for d in 1:D
+            for k in 1:K
+                if k == 1
+                    true_fn[k, d, :] = x .+ η_sorted[d]
+                elseif k == 2
+                    true_fn[k, d, :] = -x .+ η_sorted[d]
+                elseif k > 2
+                    true_fn[k, d, :] = sin.(x * k) .+ η_sorted[d]
+                end
+            end
+        end
+        return true_fn
+    end
+
 # --- Test Suite for RegressionHMM (Mixture Regression Variant) --- 
 @testset "RegressionHMM Tests" begin
 
     # --- Common Data Simulation Setup ---
     K = 3  # Number of hidden states
     D = 3  # Number of mixture components
-    P = 4     # Number of Bernstein basis functions to use in model (degree P-1)
+    P = 8     # Number of monomial basis functions to use in model (degree P-1)
     N = 100 # Number of sequences 
     T = 25  # Sequence length
     SEED = 3 # Use a different seed
@@ -21,24 +55,30 @@ import .TestUtils as SF
     # Simulate data including the auxiliary regression target 'c' and covariate 'k'
     # Note: Simulation uses M_true for generating the underlying function.
     # The model will fit using P basis functions.
+    sim_params_reg = SF.HMMRegressionSimulationParams(
+        K = K,
+        mu_dist = Normal(0, 3.0),  # Override mu_sd
+        eta_dist = Normal(0, 1.0), # Override eta_sd
+        T_range = (2, T)           # Set T_range based on test variable T
+    )
+
     sim = SF.hmm_generate_multiple_eta_reg(
-        seed = SEED, K = K, T = T, N = N, D = D, J = 1,
-        mu_sd = 3.0, 
-        eta_sd = 1.0
+        seed = SEED, K = K, T_max = T, N = N, D = D, J = 1,
+        params = sim_params_reg     # Pass the custom params
     );
     
     # Create ragged arrays
     y_rag, _ = SF.create_ragged_vector(sim.y, sim.T)
     c_rag, _ = SF.create_ragged_vector(sim.c, sim.T) 
-    k_rag, T_vec = SF.create_ragged_vector(sim.k_data, sim.T) 
+    k_rag, T_vec = SF.create_ragged_vector(sim.k, sim.T) 
 
-    # --- Calculate bounds for Bernstein basis --- 
+    # --- Calculate bounds for monomial basis --- 
     k_all = reduce(vcat, k_rag)
     k_min = minimum(k_all)
     k_max = maximum(k_all)
 
     # --- Generate Basis Matrix Ragged Array ---
-    Φ_rag = [bernstein_basis(k_seq, P-1, k_min, k_max) for k_seq in k_rag]
+    Φ_rag = [monomial_basis(k_seq, P-1) for k_seq in k_rag]
     
     # --- Create Data Struct ---
     # Use Φ_rag and P instead of k_rag and M
@@ -156,9 +196,9 @@ import .TestUtils as SF
         hcat(est_ω_sorted, true_ω_sorted)
 
 
-        @test est_ω_sorted ≈ true_ω_sorted atol=1.0
-        @test est_η_sorted ≈ true_η_sorted atol=1.0
-        @test sort(est_η_θ) ≈ sort(true_η_θ_sorted) atol=0.3 # Check mixture weights
+        @test est_ω_sorted ≈ true_ω_sorted rtol=0.1
+        @test est_η_sorted ≈ true_η_sorted rtol=0.1
+        @test sort(est_η_θ) ≈ sort(true_η_θ_sorted) rtol=0.1 # Check mixture weights
 
         # Compare transition matrices (might need looser tol or element-wise)
         # Note: True T matrix doesn't need sorting if states correspond to sorted ω
@@ -167,52 +207,21 @@ import .TestUtils as SF
 
 
         @test best_params.σ ≈ true_σ rtol=1.0
-
-    function generate_predictions(params, x, x_min, x_max)
-        P = size(params.beta, 3) # Get P from params
-        basis_features = bernstein_basis(x, P-1, x_min, x_max) # Use Bernstein basis with bounds
-        D = size(params.η_raw, 1)
-        K = size(params.ω, 1)
-        predictions = Array{Float64}(undef, K, D, length(x))
-        for d in 1:D
-            for k in 1:K
-                predictions[k, d, :] = basis_features * params.beta[d, k, :]
-            end
-        end
-        return predictions
-    end
-
-    function generate_true_fn(true_params, x)
-        D = size(true_params.η, 1)
-        K = size(true_params.μ, 1)
-        true_fn = Array{Float64}(undef, K, D, length(x))
-        for d in 1:D
-            for k in 1:K
-                if k == 1
-                    true_fn[k, d, :] = x .+ true_params.η[d]
-                elseif k == 2
-                    true_fn[k, d, :] = -x .+ true_params.η[d]
-                elseif k > 2
-                    true_fn[k, d, :] = sin.(x * k) .+ true_params.η[d]
-                end
-            end
-        end
-        return true_fn
-    end
-    x = range(-2, 2, length=100)
+    x = range(-1, 1, length=100)
     
 
 
-    c_hat = generate_predictions(best_params, x, k_min, k_max)
+    c_hat = generate_f(monomial_basis, best_params, x)
     c_true = generate_true_fn(sim.θ, x)
 
     mse_d1 = mean((c_hat[1, 1, :] - c_true[1, 1, :]).^2)
     mse_d2 = mean((c_hat[2, 2, :] - c_true[2, 2, :]).^2)
     mse_d3 = mean((c_hat[3, 3, :] - c_true[3, 3, :]).^2)
 
-    @test mse_d1 < 1.0
-    @test mse_d2 < 1.0
-    @test mse_d3 < 3.0
+
+    @test mse_d1 < 0.1
+    @test mse_d2 < 0.1
+    @test mse_d3 < 0.1
 
 
 # using Plots
@@ -233,8 +242,8 @@ import .TestUtils as SF
 
     @testset "Regression EM Convergence and Recovery" begin
         # Run EM using the parallel method dispatching on Type
-        n_inits_test = 20 # Use fewer inits for regression tests (can be slow)
-        max_iter_test = 20
+        n_inits_test = 10 # Use fewer inits for regression tests (can be slow)
+        max_iter_test = 10
 
         best_params, results = run_em!(RegressionHMMParams, regression_data; 
                                         n_init=n_inits_test, 
@@ -264,60 +273,29 @@ import .TestUtils as SF
         hcat(est_ω_sorted, true_ω_sorted)
 
 
-        @test est_ω_sorted ≈ true_ω_sorted atol=1.0
-        @test est_η_sorted ≈ true_η_sorted atol=1.0
-        @test sort(est_η_θ) ≈ sort(true_η_θ_sorted) atol=1.0 # Check mixture weights
+        @test est_ω_sorted ≈ true_ω_sorted rtol=0.1
+        @test est_η_sorted ≈ true_η_sorted rtol=0.1
+        @test sort(est_η_θ) ≈ sort(true_η_θ_sorted) rtol=0.1 # Check mixture weights
 
         # Compare transition matrices (might need looser tol or element-wise)
         # Note: True T matrix doesn't need sorting if states correspond to sorted ω
-        @test est_T_mat ≈ true_T_mat[ω_perm, ω_perm] rtol=1.0
+        @test est_T_mat ≈ true_T_mat[ω_perm, ω_perm] rtol=0.5
 
 
 
-        @test best_params.σ ≈ true_σ rtol=1.0
+        @test best_params.σ ≈ true_σ rtol=0.1
 
-    function generate_predictions(params, x, x_min, x_max)
-        P = size(params.beta, 3) # Get P from params
-        basis_features = bernstein_basis(x, P-1, x_min, x_max) # Use Bernstein basis with bounds
-        D = size(params.η_raw, 1)
-        K = size(params.ω, 1)
-        predictions = Array{Float64}(undef, K, D, length(x))
-        for d in 1:D
-            for k in 1:K
-                predictions[k, d, :] = basis_features * params.beta[d, k, :]
-            end
-        end
-        return predictions
-    end
-
-    function generate_true_fn(true_params, x)
-        D = size(true_params.η, 1)
-        K = size(true_params.μ, 1)
-        true_fn = Array{Float64}(undef, K, D, length(x))
-        for d in 1:D
-            for k in 1:K
-                if k == 1
-                    true_fn[k, d, :] = x .+ true_params.η[d]
-                elseif k == 2
-                    true_fn[k, d, :] = -x .+ true_params.η[d]
-                elseif k > 2
-                    true_fn[k, d, :] = sin.(x * k) .+ true_params.η[d]
-                end
-            end
-        end
-        return true_fn
-    end
-    x = range(-2, 2, length=100)
-    c_hat = generate_predictions(best_params, x, k_min, k_max)
+    x = range(-1, 1, length=100)
+    c_hat = generate_f(monomial_basis, best_params, x)
     c_true = generate_true_fn(sim.θ, x)
 
     mse_d1 = mean((c_hat[1, 1, :] - c_true[1, 1, :]).^2)
     mse_d2 = mean((c_hat[2, 2, :] - c_true[2, 2, :]).^2)
     mse_d3 = mean((c_hat[3, 3, :] - c_true[3, 3, :]).^2)
 
-    @test mse_d1 < 1.0
-    @test mse_d2 < 1.0
-    @test mse_d3 < 3.0
+    @test mse_d1 < 0.01
+    @test mse_d2 < 0.01
+    @test mse_d3 < 0.1
 
 
 

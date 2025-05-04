@@ -135,11 +135,18 @@ function e_step(params::MixtureHMMParams, data::MixtureHMMData)
         # Calculate γ and ξ for each mixture component
         γ_total = zeros(K, T_len)
         ξ_total = zeros(K, K, T_len-1)
+
+        log_αs = zeros(D,K, T_len)
+        log_βs = zeros(D,K, T_len)
         
         for d in 1:D
             ω_d = ω_sorted .+ η_sorted[d]
             logα = forward_logalpha(y_seq, π_s, T_mat, ω_d, σ)
             logβ = backward_logbeta(y_seq, T_mat, ω_d, σ)
+
+            log_αs[d,:,:] .= logα
+            log_βs[d,:,:] .= logβ
+
             
             # Calculate γ
             logγ = logα + logβ
@@ -150,14 +157,16 @@ function e_step(params::MixtureHMMParams, data::MixtureHMMData)
             
             # Calculate ξ
             for t in 1:(T_len-1)
+                log_ξ = zeros(K, K)
                 for j in 1:K, k in 1:K
-                    ξ_total[j,k,t] += responsibilities[i,d] * exp(
-                        logα[j,t] + log(T_mat[j,k]) +
-                        logpdf(Normal(ω_d[k], σ), y_seq[t+1]) +
-                        logβ[k,t+1]
-                    )
+                    log_ξ[j,k] = logα[j,t] + log(T_mat[j,k]) +
+                                 logpdf(Normal(ω_d[k], σ), y_seq[t+1]) +
+                                 logβ[k,t+1]
                 end
+                log_norm = logsumexp(vec(log_ξ))
+                ξ_total[:,:,t] .+= responsibilities[i,d] .* exp.(log_ξ .- log_norm)
             end
+
         end
         
         # Normalize ξ
@@ -167,6 +176,18 @@ function e_step(params::MixtureHMMParams, data::MixtureHMMData)
         
         γ_dict[i] = γ_total
         ξ_dict[i] = ξ_total
+
+        if any(isnan.(γ_total)) || any(isnan.(ξ_total))
+            @warn "NaNs detected at sequence $i"
+           println("y_seq: $y_seq")
+           println("log_αs: $log_αs")
+           println("log_βs: $log_βs")
+           println("γ_total: $γ_total")
+           println("ξ_total: $ξ_total")
+        end
+
+
+
     end
     return responsibilities, γ_dict, ξ_dict
 end
@@ -607,14 +628,24 @@ function e_step(params::RegressionHMMParams, data::RegressionHMMData)
             γ_total .+= responsibilities[i,d] .* exp.(logγ)
             
             # Calculate ξ
+            # for t in 1:(T_len-1)
+            #     for j in 1:K, k in 1:K
+            #         ξ_total[j,k,t] += responsibilities[i,d] * exp(
+            #             logα[j,t] + log(T_mat[j,k]) +
+            #             logpdf(Normal(ω_d[k], σ), y_seq[t+1]) +
+            #             logβ[k,t+1]
+            #         )
+            #     end
+            # end
             for t in 1:(T_len-1)
+                log_ξ = zeros(K, K)
                 for j in 1:K, k in 1:K
-                    ξ_total[j,k,t] += responsibilities[i,d] * exp(
-                        logα[j,t] + log(T_mat[j,k]) +
-                        logpdf(Normal(ω_d[k], σ), y_seq[t+1]) +
-                        logβ[k,t+1]
-                    )
+                    log_ξ[j,k] = logα[j,t] + log(T_mat[j,k]) +
+                                 logpdf(Normal(ω_d[k], σ), y_seq[t+1]) +
+                                 logβ[k,t+1]
                 end
+                log_norm = logsumexp(vec(log_ξ))
+                ξ_total[:,:,t] .+= responsibilities[i,d] .* exp.(log_ξ .- log_norm)
             end
         end
         

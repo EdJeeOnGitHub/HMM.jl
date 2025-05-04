@@ -3,77 +3,134 @@ module TestUtils
 
 using Random, Distributions, LinearAlgebra
 
+# --- Simulation Hyperparameters ---
+Base.@kwdef struct HMMRegressionSimulationParams
+    K::Int # Required for default A_true generation
+    mu_dist::Distribution = Normal(0, 4.0)
+    eta_dist::Distribution = Normal(0, 2.0)
+    sigma_y_true::Float64 = 1.0
+    A_true::Matrix{Float64} = hcat([runif_simplex(K) for _ in 1:K]...)'
+    k_dist::Distribution = Normal(0, 1.0)
+    c_noise_sd::Float64 = 0.1
+    T_range::Tuple{Int, Int} = (2, 50) # Default T_max = 50, adjust if needed
+end
+
+# --- Default Auxiliary Regression Function ---
+
+"""
+    default_c_func(z::Int, k_t::Float64, params::HMMRegressionSimulationParams)
+
+Default function to calculate the base mean of the auxiliary variable `c`
+depending on the hidden state `z` and covariate `k_t`.
+Replicates the logic from the original `hmm_generate_multiple_eta_reg`.
+"""
+function default_c_func(z::Int, k_t::Float64, params::HMMRegressionSimulationParams)
+    # params is unused in the default but part of the interface
+    c_base_mean = 0.0
+    if     z == 1; c_base_mean =  k_t
+    elseif z == 2; c_base_mean = -k_t
+    else;          c_base_mean =  sin(k_t * z) # Original behavior for z > 2
+    end
+    return c_base_mean
+end
+
+
 
 """
     hmm_generate_multiple_eta_reg(seed, K, T, N, D, J; mu_sd = 4.0, eta_sd = 2.0)
 
-"""
-function hmm_generate_multiple_eta_reg(;seed, K, T, N, D, J,
-                                       mu_sd = 4.0,
-                                       eta_sd = 2.0)
+Generates simulated data for a Hidden Markov Model with regression features.
 
-    # ── 1. Shared HMM parameters ────────────────────────────────────────────────
+Refactored to use `HMMRegressionSimulationParams` struct and a customizable `c_func`.
+"""
+function hmm_generate_multiple_eta_reg(; # Removed type hints for backward compatibility if needed, add if desired
+                                       seed, K, T_max, N, D, J,
+                                       params::HMMRegressionSimulationParams = HMMRegressionSimulationParams(K=K),
+                                       c_func = default_c_func
+                                      )
+
+    # ── 1. Shared HMM parameters from params struct ────────────────────────────
     Random.seed!(seed)
 
-    A   = hcat([runif_simplex(K) for _ in 1:K]...)'        # K × K transition matrix
-    pi  = stationary(A)                                     # stationary dist.
-    μ   = sort(rand(Normal(0, mu_sd), K))                  # ordered state means
-    μ   = create_stationary_omegas(μ, pi)                  # user‑supplied helper
+    A   = params.A_true # Use A from params
+    pi  = stationary(A) # stationary dist.
 
-    η        = rand(Normal(0, eta_sd), D)                  # random‑effect pool
-    η_id     = rand(1:D, N)                                # id ↦ pool index
-    η_ii     = η[η_id]                                     # realised ηᵢ
-    σ        = abs(randn())                                # common σ
-    T_indiv  = rand(2:T, N)                                # individual horizon
+    # Generate initial means, sort, and center using stationary distribution
+    # Note: Requires create_stationary_omegas helper defined later
+    μ_init = sort(rand(params.mu_dist, K))
+    μ      = create_stationary_omegas(μ_init, pi)
 
-    # ── 2. Allocate containers ──────────────────────────────────────────────────
-    Z = zeros(Int,    N, T)      # hidden states
-    Y = zeros(Float64, N, T)     # observations
+    η        = rand(params.eta_dist, D)       # random‑effect pool
+    η_id     = rand(1:D, N)                   # id ↦ pool index
+    η_ii     = η[η_id]                        # realised ηᵢ
+    σ        = params.sigma_y_true            # Y observation noise SD from params
 
-    # ── 3. Simulate panel ───────────────────────────────────────────────────────
+    # Generate individual horizons using T_range from params
+    T_indiv  = rand(params.T_range[1]:params.T_range[2], N)
+    # Ensure no T_indiv exceeds T_max (allocated array size)
+    T_indiv = min.(T_indiv, T_max)
+
+    # ── 2. Allocate containers (using T_max) ───────────────────────────────────
+    Z = zeros(Int,    N, T_max)      # hidden states
+    Y = zeros(Float64, N, T_max)     # observations
+
+    # ── 3. Simulate state paths and Y observations ──────────────────────────────
     for i in 1:N
         Z[i, 1] = rand(Categorical(pi))                    # initial state
-        maxT    = T_indiv[i]
+        maxT_i  = T_indiv[i] # Use individual T for simulation loop
 
-        for t in 2:T                                       # state path
+        # State path
+        for t in 2:maxT_i
             Z[i, t] = rand(Categorical(A[Z[i, t - 1], :]))
         end
 
-        for t in 1:T                                       # observations
-            if t ≤ maxT
-                Y[i, t] = rand(Normal(μ[Z[i, t]] + η_ii[i], σ))
-            else                                           # padded “missing” value
-                Y[i, t] = -1.0e5
-                Z[i, t] = -100_000
-            end
+        # Observations Y
+        for t in 1:maxT_i
+            Y[i, t] = rand(Normal(μ[Z[i, t]] + η_ii[i], σ))
+        end
+
+        # Pad remaining steps if T_indiv[i] < T_max
+        if maxT_i < T_max
+            Y[i, (maxT_i + 1):T_max] .= -1.0e5 # Padding value
+            Z[i, (maxT_i + 1):T_max] .= -100_000 # Padding value
         end
     end
 
-    # ── 4. Extra covariates (k, c) ──────────────────────────────────────────────
-    k_data = randn(N, T)                                   # exogenous k
-    c_data = zeros(Float64, N, T)
+    # ── 4. Generate Covariates (k, c) using params and c_func ──────────────────
+    k_data = rand(params.k_dist, N, T_max) # Exogenous k using k_dist from params
+    c_data = zeros(Float64, N, T_max)
 
-    for i in 1:N, t in 1:T
-        z = Z[i, t]
-        if     z == 1; c_data[i, t] =  k_data[i, t]
-        elseif z == 2; c_data[i, t] = -k_data[i, t]
-        elseif z  > 2; c_data[i, t] =  sin(k_data[i, t] * z)
+    for i in 1:N
+        maxT_i = T_indiv[i]
+        eta_i = η_ii[i]
+        for t in 1:maxT_i
+            z = Z[i, t]
+            k_t = k_data[i, t]
+
+            # Calculate base mean using the provided c_func
+            c_base = c_func(z, k_t, params)
+
+            # Add random effect and noise (using c_noise_sd from params)
+            c_data[i, t] = c_base + eta_i + rand(Normal(0, params.c_noise_sd))
+        end
+        # Pad remaining steps for c_data
+        if maxT_i < T_max
+            c_data[i, (maxT_i + 1):T_max] .= -1.0e5 # Padding value
         end
     end
-    c_data .+= η_ii .* ones(1, T) .+ 0.1 .* randn(N, T)
 
-    # ── 5. Package results ──────────────────────────────────────────────────────
+    # ── 5. Package results ──────────────────────────────────────────────────────
     return (
         J       = J,
         j_idx   = rand(1:J, N),          # study index for each i
         y       = Y,
         z       = Z,
         c       = c_data,
-        k_data  = k_data,
+        k       = k_data, 
         T       = T_indiv,
         η_ii    = η_ii,
-        θ       = (π = pi, A = A, μ = μ, σ = σ,
-                   η_id = η_id, η = η)
+        θ  = (π = pi, A = A, μ = μ, σ = σ, 
+                   η_id = η_id, η = η, params=params) # Include params used
     )
 end
 
@@ -83,7 +140,7 @@ end
     runif_simplex(n) = Vector{Float64}
 
 Draw a single point uniformly from the `(n‑1)`‑simplex:
-non‑negative entries that sum to 1.
+non‑negative entries that sum to 1.
 """
 function runif_simplex(n::Integer)
     v = rand(n)
@@ -156,6 +213,7 @@ function create_ragged_vector(x, t)
     end
     return ragged_x_vector, ragged_t_vector
 end
+
 
 
 end # module TestUtils 
