@@ -22,20 +22,15 @@ import .TestUtils as SF
         return predictions
     end
 
-    function generate_true_fn(true_params, x)
-        D = size(true_params.η, 1)
-        K = size(true_params.μ, 1)
-        true_fn = Array{Float64}(undef, K, D, length(x))
-        η_sorted = sort(true_params.η)
-        for d in 1:D
-            for k in 1:K
-                if k == 1
-                    true_fn[k, d, :] = x .+ η_sorted[d]
-                elseif k == 2
-                    true_fn[k, d, :] = -x .+ η_sorted[d]
-                elseif k > 2
-                    true_fn[k, d, :] = sin.(x * k) .+ η_sorted[d]
-                end
+    function generate_true_fn(xs, ωs, ηs, c_func)
+        ωs = sort(ωs)
+        ηs = sort(ηs)
+        K = length(ωs)
+        D = length(ηs)
+        true_fn = zeros(K, D, length(xs))
+        for k in 1:K
+            for d in 1:D
+                true_fn[k, d, :] = c_func.(xs, ωs[k], ηs[d])
             end
         end
         return true_fn
@@ -51,6 +46,7 @@ import .TestUtils as SF
     N = 100 # Number of sequences 
     T = 25  # Sequence length
     SEED = 3 # Use a different seed
+    basis_fn = monomial_basis
 
     # Simulate data including the auxiliary regression target 'c' and covariate 'k'
     # Note: Simulation uses M_true for generating the underlying function.
@@ -78,7 +74,7 @@ import .TestUtils as SF
     k_max = maximum(k_all)
 
     # --- Generate Basis Matrix Ragged Array ---
-    Φ_rag = [monomial_basis(k_seq, P-1) for k_seq in k_rag]
+    Φ_rag = [basis_fn(k_seq, P-1) for k_seq in k_rag]
     
     # --- Create Data Struct ---
     # Use Φ_rag and P instead of k_rag and M
@@ -211,8 +207,8 @@ import .TestUtils as SF
     
 
 
-    c_hat = generate_f(monomial_basis, best_params, x)
-    c_true = generate_true_fn(sim.θ, x)
+    c_hat = generate_f(basis_fn, best_params, x)
+    c_true = generate_true_fn(x, sort(best_params.ω), sort(best_params.η_raw), SF.default_c_func)
 
     mse_d1 = mean((c_hat[1, 1, :] - c_true[1, 1, :]).^2)
     mse_d2 = mean((c_hat[2, 2, :] - c_true[2, 2, :]).^2)
@@ -285,9 +281,9 @@ import .TestUtils as SF
 
         @test best_params.σ ≈ true_σ rtol=0.1
 
-    x = range(-1, 1, length=100)
-    c_hat = generate_f(monomial_basis, best_params, x)
-    c_true = generate_true_fn(sim.θ, x)
+    x = range(-2, 2, length=100)
+    c_hat = generate_f(basis_fn, best_params, x)
+    c_true = generate_true_fn(x, sort(best_params.ω), sort(best_params.η_raw), SF.default_c_func)
 
     mse_d1 = mean((c_hat[1, 1, :] - c_true[1, 1, :]).^2)
     mse_d2 = mean((c_hat[2, 2, :] - c_true[2, 2, :]).^2)

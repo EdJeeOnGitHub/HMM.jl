@@ -24,14 +24,10 @@ Default function to calculate the base mean of the auxiliary variable `c`
 depending on the hidden state `z` and covariate `k_t`.
 Replicates the logic from the original `hmm_generate_multiple_eta_reg`.
 """
-function default_c_func(z::Int, k_t::Float64, params::HMMRegressionSimulationParams)
+function default_c_func(k, z, eta)
     # params is unused in the default but part of the interface
-    c_base_mean = 0.0
-    if     z == 1; c_base_mean =  k_t
-    elseif z == 2; c_base_mean = -k_t
-    else;          c_base_mean =  sin(k_t * z) # Original behavior for z > 2
-    end
-    return c_base_mean
+    c_base_mean = (z < 0) * k + (z >= 0) * (z < 1) * -k + (z >= 1) * sin(k * z)
+    return c_base_mean + eta
 end
 
 
@@ -108,10 +104,9 @@ function hmm_generate_multiple_eta_reg(; # Removed type hints for backward compa
             k_t = k_data[i, t]
 
             # Calculate base mean using the provided c_func
-            c_base = c_func(z, k_t, params)
-
+            c_base = c_func(k_t, z, eta_i)
             # Add random effect and noise (using c_noise_sd from params)
-            c_data[i, t] = c_base + eta_i + rand(Normal(0, params.c_noise_sd))
+            c_data[i, t] = c_base + rand(Normal(0, params.c_noise_sd))
         end
         # Pad remaining steps for c_data
         if maxT_i < T_max
