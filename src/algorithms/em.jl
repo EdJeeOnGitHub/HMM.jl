@@ -844,3 +844,364 @@ function run_em!(params::RegressionHMMParams, data::RegressionHMMData; maxiter=5
     return params
 end
 
+
+#### Stochastic EM ####
+
+"""
+    stochastic_e_step(params::RegressionHMMParams, data::RegressionHMMData, 
+                     batch_size::Int)
+
+Perform the E-step for a random mini-batch of sequences in the Stochastic EM algorithm.
+
+# Arguments
+- `params::RegressionHMMParams`: Current model parameters
+- `data::RegressionHMMData`: The full dataset
+- `batch_size::Int`: Number of sequences to include in the mini-batch
+
+# Returns
+- `responsibilities::Matrix{T}`: Responsibilities for the batch (batch_size × D)
+- `γ_dict::Dict{Int,Matrix{T}}`: Dictionary of state responsibilities for each sequence
+- `ξ_dict::Dict{Int,Array{T,3}}`: Dictionary of transition responsibilities for each sequence
+- `batch_indices::Vector{Int}`: Indices of sequences used in this batch
+"""
+function stochastic_e_step(params::RegressionHMMParams{T}, 
+                         data::RegressionHMMData{T},
+                         stochastic_config::StochasticEMConfig,
+                         seed::Int) where {T}
+    # Create a random mini-batch
+    batch_size = stochastic_config.batch_size
+    batch_indices = rand(Random.MersenneTwister(seed), 1:length(data.y_rag), min(batch_size, length(data.y_rag)))
+
+    if (stochastic_config.t % stochastic_config.full_batch_step == 0) && (stochastic_config.t > 0)
+        batch_indices = 1:length(data.y_rag)
+    end
+    
+    # Create mini-batch data
+    batch_data = RegressionHMMData(
+        data.y_rag[batch_indices],
+        data.c_rag[batch_indices],
+        data.Φ_rag[batch_indices],
+        data.D,
+        data.K,
+        data.P
+    )
+    
+    # Use existing E-step on the mini-batch
+    responsibilities, γ_dict, ξ_dict = e_step(params, batch_data)
+    
+    
+    return responsibilities, γ_dict, ξ_dict, batch_indices
+end
+
+
+function stochastic_m_step!(
+    params::RegressionHMMParams,
+    data::RegressionHMMData,
+    stochastic_config::StochasticEMConfig,
+    responsibilities,
+    γ_dict,
+    ξ_dict,
+    batch_indices
+)
+    (; y_rag, c_rag, Φ_rag, K, D, P) = data
+    (; η_raw, η_θ, ω, T_list, σ, beta, sigma_f) = params
+    (; τ, t) = stochastic_config
+
+    y_rag_batch = y_rag[batch_indices]
+    c_rag_batch = c_rag[batch_indices]
+    Φ_rag_batch = Φ_rag[batch_indices]
+
+    N_batch = length(y_rag_batch)
+    T_mat = hcat(T_list...)'
+    π_s = stationary(T_mat)
+
+    # Stochastic updating weight
+
+    ρ = 1 / (log(t))
+    # ρ = 1
+
+
+
+    # === Update η_θ ===
+
+    # === Update η_θ ===
+    batch_η_θ = vec(sum(responsibilities, dims=1)) ./ N_batch
+    params.η_θ .= (1 - ρ) * params.η_θ + ρ * batch_η_θ
+
+    # === Update transition matrix ===
+    T_counts = zeros(K, K)
+    for i in 1:N_batch
+        ξ = ξ_dict[i]
+        for t in 1:size(ξ, 3)
+            T_counts .+= ξ[:,:,t]
+        end
+    end
+    for k in 1:K
+        params.T_list[k] .= (1 - ρ) * params.T_list[k] + ρ * (T_counts[k,:] ./ sum(T_counts[k,:]))
+    end
+
+    # === Update ω and η ===
+    ω_new = zeros(K)
+    ω_weight = zeros(K)
+
+    for i in 1:N_batch
+        y_seq = y_rag_batch[i]
+        γ = γ_dict[i]
+        for t in 1:length(y_seq)
+            for d in 1:D, k in 1:K
+                r = responsibilities[i,d]
+                ω_new[k] += r * γ[k,t] * (y_seq[t] - η_raw[d])
+                ω_weight[k] += r * γ[k,t]
+            end
+        end
+    end
+    ω_new = recentre_mu(ω_new ./ (ω_weight .+ 1e-8), π_s)
+    params.ω .= (1 - ρ) * params.ω + ρ * ω_new
+    # params.ω .= (1 - ρ) * params.ω + ρ * (ω_new ./ (ω_weight .+ 1e-8))
+    # params.ω .= recentre_mu(params.ω, π_s)
+
+    η_new = zeros(D)
+    η_weight = zeros(D)
+    for i in 1:N_batch
+        y_seq = y_rag_batch[i]
+        γ = γ_dict[i]
+        for t in 1:length(y_seq)
+            for d in 1:D, k in 1:K
+                r = responsibilities[i,d]
+                η_new[d] += r * γ[k,t] * (y_seq[t] - params.ω[k])
+                η_weight[d] += r * γ[k,t]
+            end
+        end
+    end
+    params.η_raw .= (1 - ρ) * params.η_raw + ρ * (η_new ./ (η_weight .+ 1e-8))
+
+    # === Update σ ===
+    σ_numer = 0.0
+    σ_denom = 0.0
+    for i in 1:N_batch
+        y_seq = y_rag_batch[i]
+        γ = γ_dict[i]
+        for t in 1:length(y_seq)
+            for d in 1:D, k in 1:K
+                r = responsibilities[i,d]
+                err = y_seq[t] - (params.ω[k] + params.η_raw[d])
+                σ_numer += r * γ[k,t] * err^2
+                σ_denom += r * γ[k,t]
+            end
+        end
+    end
+    params.σ = (1 - ρ) * params.σ + ρ * sqrt((σ_numer + 1e-6) / (σ_denom + 1e-8))
+
+    # === Update β and σ_f ===
+    σf_numer = 0.0
+    σf_denom = 0.0
+    for d in 1:D, k in 1:K
+        X = Float64[]
+        Y = Float64[]
+        W = Float64[]
+
+        for i in 1:N_batch
+            γ = γ_dict[i]
+            r = responsibilities[i,d]
+            c = c_rag_batch[i]
+            Φ = Φ_rag_batch[i]
+
+            for t in 1:length(c)
+                w = r * γ[k, t]
+                if w > 1e-12  # skip near-zero weights
+                    push!(W, w)
+                    push!(Y, c[t])
+                    push!(X, Φ[t,:]...)  # row-wise flatten
+                end
+            end
+        end
+
+        # Reshape into matrices
+        T_obs = length(W)
+        Xmat = reshape(X, P, T_obs)'  # T × P
+        Wvec = Diagonal(W)
+        Yvec = Y
+
+        XtWX = Xmat' * Wvec * Xmat
+        XtWY = Xmat' * Wvec * Yvec
+
+        # Add ridge penalty for stability
+        T = eltype(XtWX) # Get type for lambda and I
+        lambda = T(1e-6) # Small ridge penalty
+        I_P = Diagonal(ones(T, P)) # Identity matrix of size PxP
+
+        # Solve the regularized system
+        # params.beta[d, k, :] .= (1 - ρ) * params.beta[d, k, :] + ρ * (XtWX + lambda * I_P) \ XtWY  # update β with ridge
+        params.beta[d, k, :] .=  (XtWX + lambda * I_P) \ XtWY  # update β with ridge
+
+        residuals = Yvec .- Xmat * params.beta[d, k, :]
+        σf_numer += sum(W .* residuals.^2)
+        σf_denom += sum(W)
+    end
+
+    params.sigma_f = (1 - ρ) * params.sigma_f + ρ * sqrt((σf_numer + 1e-6) / (σf_denom + 1e-8))
+    stochastic_config.t += 1
+
+    return params
+end
+
+
+"""
+    run_stochastic_em!(params::RegressionHMMParams, data::RegressionHMMData, 
+                      config::StochasticEMConfig; maxiter=1000, verbose=false)
+
+Run the Stochastic EM algorithm with Robbins-Monro updates for a Regression HMM.
+
+# Arguments
+- `params::RegressionHMMParams`: Initial parameters
+- `data::RegressionHMMData`: The full dataset
+- `config::StochasticEMConfig`: Configuration for stochastic updates
+- `maxiter::Int`: Maximum number of iterations
+- `verbose::Bool`: Whether to print progress information
+
+# Returns
+- `params::RegressionHMMParams`: Updated parameters
+"""
+function run_stochastic_em!(
+    params::RegressionHMMParams,
+    data::RegressionHMMData,
+    config::StochasticEMConfig;
+    maxiter=1000,
+    verbose=false
+)
+    try
+        # Initialize random number generator for reproducibility
+        rng = Random.MersenneTwister(42)
+        
+        # Track best parameters and log density
+        best_logp = -Inf
+        best_params = deepcopy(params)
+        
+        for iter in 1:maxiter
+            # Generate random seed for this iteration
+            seed = rand(rng, 1:1000000)
+            
+            # Stochastic E-step
+            responsibilities, γ_dict, ξ_dict, batch_indices = stochastic_e_step(
+                params, data, config, seed
+            )
+            
+            # Stochastic M-step with Robbins-Monro updates
+            stochastic_m_step!(
+                params, data, config,
+                responsibilities, γ_dict, ξ_dict, batch_indices
+            )
+            
+            
+            # Compute log density on full dataset
+            new_logp = logdensity(params, data)
+            
+            if !isfinite(new_logp)
+                verbose && println("Stochastic EM Iteration $iter: Log density became non-finite ($new_logp). Stopping.")
+                break
+            end
+            
+            # Update best parameters if we found a better solution
+            if new_logp > best_logp
+                best_logp = new_logp
+                best_params = deepcopy(params)
+            end
+            
+            if verbose && iter % config.full_batch_step == 0
+                println("Stochastic EM Iteration $iter: logp = $(round(new_logp, digits=4))")
+            end
+        end
+        
+        # Return best parameters found
+        return best_params
+        
+    catch e
+        println("Error during Stochastic EM: $e")
+        rethrow(e)
+    end
+end
+
+"""
+    run_stochastic_em!(::Type{RegressionHMMParams}, data::RegressionHMMData, 
+                      config::StochasticEMConfig; n_init=50, maxiter=1000, verbose=false)
+
+Run the Stochastic EM algorithm with multiple random initializations in parallel.
+
+# Arguments
+- `::Type{RegressionHMMParams}`: The parameter type to use
+- `data::RegressionHMMData`: The full dataset
+- `config::StochasticEMConfig`: Configuration for stochastic updates
+- `n_init::Int`: Number of random initializations to run
+- `maxiter::Int`: Maximum number of iterations per run
+- `verbose::Bool`: Whether to print progress information
+
+# Returns
+- `best_params::RegressionHMMParams`: The best parameters found
+- `results::Vector`: Vector of results from all runs
+"""
+function run_stochastic_em!(
+    ::Type{RegressionHMMParams},
+    data::RegressionHMMData,
+    config::StochasticEMConfig,
+    n_init_tries::Int;
+    n_init=50,
+    maxiter=1000,
+    verbose=false
+)
+    # Infer type T for storing results
+    first_el_type = Float64 # Default type
+    if !isempty(data.y_rag) && !isempty(data.y_rag[1])
+        first_el_type = eltype(data.y_rag[1][1])
+    end
+    Tval = first_el_type
+
+    # Store results: Vector of tuples (logp, params) or Nothing
+    results = Vector{Union{Nothing, Tuple{Tval, RegressionHMMParams}}}(undef, n_init)
+    # Store logps separately for faster argmax
+    logps = fill(Tval(-Inf), n_init)
+    n_threads = Threads.nthreads()
+
+    verbose && println("Starting $n_init Stochastic EM initializations using $n_threads threads...")
+
+    Threads.@threads for i in 1:n_init
+        local_params = initialize_params(RegressionHMMParams, i, data, n_init_tries)
+        try
+            run_stochastic_em!(local_params, data, config; maxiter=maxiter, verbose=verbose)
+            logp = logdensity(local_params, data)
+            if isfinite(logp)
+                logps[i] = logp
+                results[i] = (logp, local_params)
+            else
+                verbose && println("Run $i finished but produced non-finite log density ($logp).")
+                results[i] = nothing
+            end
+        catch e
+            verbose && println("Stochastic EM run $i failed with error: $e")
+            results[i] = nothing
+        end
+    end
+
+    # Find successful runs (those with finite logp)
+    successful_indices = findall(isfinite.(logps))
+
+    if isempty(successful_indices)
+        error("All Stochastic EM initializations failed or produced non-finite log densities.")
+    end
+
+    num_successful = length(successful_indices)
+    verbose && println("Completed $num_successful out of $n_init runs successfully.")
+
+    # Find best result among successful runs
+    best_idx_in_successful = argmax(logps[successful_indices])
+    best_global_idx = successful_indices[best_idx_in_successful]
+    best_logp, best_params = results[best_global_idx]
+
+    if verbose
+        println("Best log density found: $(round(best_logp, digits=4)) (Run $best_global_idx)")
+    end
+
+    return best_params, results
+end
+
+
+            

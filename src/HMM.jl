@@ -24,6 +24,7 @@ include("algorithms/forward_backward.jl")
 include("models/simple.jl")
 include("models/mixture.jl")
 include("models/regression.jl") # Add include for regression model
+include("models/stochastic_regression.jl")
 
 # EM algorithm steps (may depend on models and core algorithms)
 include("algorithms/em.jl") 
@@ -51,8 +52,17 @@ export hermite_basis # Export basis function
 # export run_mixture_regression_em!, ...
 # export run_parallel_em
 
+# Export types
+export AbstractHMMData, AbstractHMMParams
+export SimpleHMMData, SimpleHMMParams
+export MixtureHMMData, MixtureHMMParams
+export RegressionHMMData, RegressionHMMParams
+export StochasticEMConfig
 
-
+# Export functions
+export initialize_params, logdensity
+export e_step, m_step!, run_em!
+export stochastic_e_step, stochastic_m_step!, run_stochastic_em!
 
 end # module HMM
 

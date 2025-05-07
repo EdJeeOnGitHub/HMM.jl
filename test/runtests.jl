@@ -11,6 +11,9 @@ using Test
     # Regression HMM tests
     include("regression_hmm_tests.jl")
 
+    # Stochastic Regression HMM tests
+    include("stochastic_regression_hmm_tests.jl")
+
     # Placeholder for future tests
     # include("utils_tests.jl")
 end 

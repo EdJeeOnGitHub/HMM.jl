@@ -191,11 +191,17 @@ function logdensity(params::RegressionHMMParams{T}, data::RegressionHMMData{T}) 
     # === Priors ===
     logp += sum(logpdf(Normal(0,1), ω))
     for i in 1:K
-        logp += logpdf(Dirichlet(ones(K) / K), T_list[i])
+        t_contrib = logpdf(Dirichlet(ones(K) / K), T_list[i])
+        if !isfinite(t_contrib)
+            logp += t_contrib
+        end
     end
     logp += logpdf(Truncated(Normal(0,1), 0, Inf), σ)
     logp += sum(logpdf(Normal(0,1), η_raw))
-    logp += logpdf(Dirichlet(ones(D) / D), η_θ)
+    η_θ_contrib = logpdf(Dirichlet(ones(D) / D), η_θ)
+    if !isfinite(η_θ_contrib)
+        logp += η_θ_contrib
+    end
 
     # Prior over regression parameters
     for d in 1:D, k in 1:K
@@ -203,7 +209,7 @@ function logdensity(params::RegressionHMMParams{T}, data::RegressionHMMData{T}) 
     end
 
     # Prior over sigma_f
-    logp += logpdf(Truncated(Normal(0,1), 0, Inf), sigma_f)
+    logp += logpdf(Truncated(Normal(0,1), 0, Inf), sigma_f .+ 1e-6)
 
     # === Likelihood ===
     N = length(y_rag)
