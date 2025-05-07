@@ -876,7 +876,7 @@ function stochastic_e_step(params::RegressionHMMParams{T},
         batch_indices = 1:length(data.y_rag)
     end
     if length(batch_indices) > stochastic_config.max_data_size
-        batch_indices = rand(Random.MersenneTwister(seed), 1:length(data.y_rag), stochastic_config.max_data_size)
+        batch_indices = rand(Random.MersenneTwister(seed), 1:length(data.y_rag), Int(stochastic_config.max_data_size))
     end
 
     
