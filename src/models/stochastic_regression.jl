@@ -20,9 +20,10 @@ mutable struct StochasticEMConfig
     t::Int
     full_batch_step::Int
     batch_size::Int
+    max_data_size::Float64
 end
-function StochasticEMConfig(; τ=100, t=0, full_batch_step=10, batch_size=20)
-    return StochasticEMConfig(τ, t, full_batch_step, batch_size)
+function StochasticEMConfig(; τ=100, t=0, full_batch_step=10, batch_size=20, max_data_size=Inf)
+    return StochasticEMConfig(τ, t, full_batch_step, batch_size, max_data_size)
 end
 
 

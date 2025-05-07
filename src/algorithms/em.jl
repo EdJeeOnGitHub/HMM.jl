@@ -872,9 +872,13 @@ function stochastic_e_step(params::RegressionHMMParams{T},
     batch_size = stochastic_config.batch_size
     batch_indices = rand(Random.MersenneTwister(seed), 1:length(data.y_rag), min(batch_size, length(data.y_rag)))
 
-    if (stochastic_config.t % stochastic_config.full_batch_step == 0) && (stochastic_config.t > 0)
+    if (stochastic_config.t % stochastic_config.full_batch_step == 0) && (stochastic_config.t > 0) 
         batch_indices = 1:length(data.y_rag)
     end
+    if length(batch_indices) > stochastic_config.max_data_size
+        batch_indices = rand(Random.MersenneTwister(seed), 1:length(data.y_rag), stochastic_config.max_data_size)
+    end
+
     
     # Create mini-batch data
     batch_data = RegressionHMMData(
