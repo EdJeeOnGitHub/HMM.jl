@@ -129,7 +129,7 @@ end
 
 # Initialize by running the mixture version first, then adding the regression parameters
 function initialize_params(::Type{RegressionHMMParams}, seed::Int, data::RegressionHMMData, n_tries::Int)
-    mix_data = MixtureHMMData(data.y_rag, data.D, data.K)
+    mix_data = MixtureHMMData(data.y_rag, data.K, data.D)
     mix_params = initialize_params(MixtureHMMParams, seed, mix_data)
     best_mix_params = run_em!(mix_params, mix_data, maxiter = 5)
     best_mix_logp = logdensity(best_mix_params, mix_data)
