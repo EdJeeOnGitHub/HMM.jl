@@ -94,7 +94,6 @@ end
 
     @testset "Stochastic EM Configuration" begin
         config = StochasticEMConfig(
-            τ = 100,  # Robbins-Monro parameter
             batch_size = 10
         )
         
@@ -123,7 +122,7 @@ end
 
     @testset "Stochastic E-step and M-step" begin
         params = initialize_params(RegressionHMMParams, SEED+1, regression_data)
-        config = StochasticEMConfig(τ=100, batch_size=10, full_batch_step=10)
+        config = StochasticEMConfig(batch_size=10, full_batch_step=10)
         
         # Test stochastic E-step
         responsibilities, γ_dict, ξ_dict, batch_indices = stochastic_e_step(
@@ -158,7 +157,7 @@ end
         # Run Stochastic EM using the parallel method
         n_inits_test = 10  # Use fewer inits for stochastic tests
         max_iter_test = 1_000
-        config = StochasticEMConfig(τ=500, batch_size=50, full_batch_step=100)
+        config = StochasticEMConfig(batch_size=50, full_batch_step=100)
 
         best_params, results = run_stochastic_em!(
             RegressionHMMParams,

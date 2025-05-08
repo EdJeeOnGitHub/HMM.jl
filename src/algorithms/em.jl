@@ -921,8 +921,7 @@ function stochastic_m_step!(
 
     # Stochastic updating weight
 
-    ρ = 1 / (log(t))
-    # ρ = 1
+    ρ = config.weight_fn(t)
 
 
 
@@ -1077,9 +1076,6 @@ function run_stochastic_em!(
         # Initialize random number generator for reproducibility
         rng = Random.MersenneTwister(42)
         
-        # Track best parameters and log density
-        best_logp = -Inf
-        best_params = deepcopy(params)
         
         for iter in 1:maxiter
             # Generate random seed for this iteration
@@ -1096,28 +1092,23 @@ function run_stochastic_em!(
                 responsibilities, γ_dict, ξ_dict, batch_indices
             )
             
+            if iter % config.full_batch_step == 0
+                # Compute log density on full dataset
+                new_logp = logdensity(params, data)
+                if !isfinite(new_logp)
+                    verbose && println("Stochastic EM Iteration $iter: Log density became non-finite ($new_logp). Stopping.")
+                    break
+                end
+                if verbose
+                    println("Stochastic EM Iteration $iter: logp = $(round(new_logp, digits=4))")
+                end
+
+            end      
             
-            # Compute log density on full dataset
-            new_logp = logdensity(params, data)
-            
-            if !isfinite(new_logp)
-                verbose && println("Stochastic EM Iteration $iter: Log density became non-finite ($new_logp). Stopping.")
-                break
-            end
-            
-            # Update best parameters if we found a better solution
-            if new_logp > best_logp
-                best_logp = new_logp
-                best_params = deepcopy(params)
-            end
-            
-            if verbose && iter % config.full_batch_step == 0
-                println("Stochastic EM Iteration $iter: logp = $(round(new_logp, digits=4))")
-            end
         end
         
-        # Return best parameters found
-        return best_params
+        # Return final parameters found
+        return params
         
     catch e
         println("Error during Stochastic EM: $e")
