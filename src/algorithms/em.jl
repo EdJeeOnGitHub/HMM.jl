@@ -909,7 +909,7 @@ function stochastic_m_step!(
 )
     (; y_rag, c_rag, Φ_rag, K, D, P) = data
     (; η_raw, η_θ, ω, T_list, σ, beta, sigma_f) = params
-    (; τ, t) = stochastic_config
+    (; t) = stochastic_config
 
     y_rag_batch = y_rag[batch_indices]
     c_rag_batch = c_rag[batch_indices]
