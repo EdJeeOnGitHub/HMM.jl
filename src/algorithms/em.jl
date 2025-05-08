@@ -921,7 +921,7 @@ function stochastic_m_step!(
 
     # Stochastic updating weight
 
-    ρ = config.weight_fn(t)
+    ρ = stochastic_config.weight_fn(t)
 
 
 
