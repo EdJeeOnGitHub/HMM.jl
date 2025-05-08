@@ -15,13 +15,14 @@ Configuration structure for Stochastic EM with Robbins-Monro updating.
 - `t::Int`: Current iteration count for learning rate scheduling
 - `batch_size::Int`: Size of mini-batch to use for stochastic updates
 """
-mutable struct StochasticEMConfig
-    weight_fn::Function
+mutable struct StochasticEMConfig{F}
+    weight_fn::F
     t::Int
     full_batch_step::Int
     batch_size::Int
     max_data_size::Float64
 end
+
 function StochasticEMConfig(; weight_fn = x -> 1/log(x), t=0, full_batch_step=10, batch_size=20, max_data_size=Inf)
     return StochasticEMConfig(weight_fn, t, full_batch_step, batch_size, max_data_size)
 end

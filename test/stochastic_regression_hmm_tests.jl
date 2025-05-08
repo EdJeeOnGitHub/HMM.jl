@@ -42,8 +42,8 @@ end
     K = 3  # Number of hidden states
     D = 3  # Number of mixture components
     P = 8  # Number of monomial basis functions to use in model (degree P-1)
-    N = 100 # Number of sequences 
-    T = 25  # Sequence length
+    N = 1000 # Number of sequences 
+    T = 5  # Sequence length
     SEED = 3 # Use a different seed
     basis_fn = monomial_basis
 
@@ -98,7 +98,6 @@ end
         )
         
         @test config isa StochasticEMConfig
-        @test config.τ > 0
         @test config.batch_size > 0
         @test config.batch_size <= N
     end
@@ -155,8 +154,8 @@ end
 
     @testset "Stochastic EM Convergence and Recovery" begin
         # Run Stochastic EM using the parallel method
-        n_inits_test = 10  # Use fewer inits for stochastic tests
-        max_iter_test = 1_000
+        n_inits_test = 50  # Use fewer inits for stochastic tests
+        max_iter_test = 1000
         config = StochasticEMConfig(batch_size=50, full_batch_step=100)
 
         best_params, results = run_stochastic_em!(
