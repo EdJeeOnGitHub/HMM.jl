@@ -43,7 +43,7 @@ end
     D = 3  # Number of mixture components
     P = 8  # Number of monomial basis functions to use in model (degree P-1)
     N = 1000 # Number of sequences 
-    T = 5  # Sequence length
+    T = 10  # Sequence length
     SEED = 3 # Use a different seed
     basis_fn = monomial_basis
 
@@ -78,8 +78,12 @@ end
 
     # Get True Parameters
     true_ω = sort(sim.θ.μ)
+    mean(true_ω)
     true_η = sort(sim.θ.η) 
     true_η_θ = counts(sim.θ.η_id, 1:D) ./ N 
+    stationary_dist = (sim.θ.A^1000)[1, :];
+    sum(stationary_dist)
+    mean(stationary_dist' * true_ω)
     true_T_mat = sim.θ.A
     true_T_list = [Vector{Float64}(true_T_mat[i, :]) for i in 1:K]
     true_σ = sim.θ.σ
@@ -154,9 +158,9 @@ end
 
     @testset "Stochastic EM Convergence and Recovery" begin
         # Run Stochastic EM using the parallel method
-        n_inits_test = 50  # Use fewer inits for stochastic tests
-        max_iter_test = 1000
-        config = StochasticEMConfig(batch_size=50, full_batch_step=100)
+        n_inits_test = 10  # Use fewer inits for stochastic tests
+        max_iter_test = 1_000
+        config = StochasticEMConfig(weight_fn = x -> 1/(x + 1000), batch_size=100, full_batch_step=250)
 
         best_params, results = run_stochastic_em!(
             RegressionHMMParams,
@@ -167,6 +171,12 @@ end
             maxiter=max_iter_test,
             verbose=true
         );
+
+
+        results
+        res_lps = [isnothing(x) ? NaN : x[1] for x in results]
+
+        sort(res_lps)
 
         orig_best_params = deepcopy(best_params)
         best_params = run_em!(best_params, regression_data, maxiter=max_iter_test, verbose=true);
@@ -187,6 +197,15 @@ end
 
         hcat(est_ω_sorted, true_ω_sorted)
         hcat(est_η_sorted, true_η_sorted)
+        hcat(vec(est_T_mat), vec(true_T_mat))
+        plot(
+            vec(true_T_mat),
+            vec(est_T_mat),
+            label = "T_mat",
+            seriestype = :scatter
+        )
+
+
         # Compare sorted estimated params to sorted true params
         # Use looser tolerances for stochastic EM
         @test est_ω_sorted ≈ true_ω_sorted rtol=0.2
@@ -198,21 +217,36 @@ end
         # Test regression function recovery
         x = range(-2, 2, length=100)
         c_hat = generate_f(basis_fn, best_params, x)
-        c_true = generate_true_fn(x, sort(best_params.ω), sort(best_params.η_raw), SF.default_c_func)
+        c_hat = generate_true_fn(x, sort(best_params.ω), sort(best_params.η_raw), SF.default_c_func)
+        c_true = generate_true_fn(x, true_ω_sorted, true_η_sorted, SF.default_c_func)
+
 
         mse_d1 = mean((c_hat[1, 1, :] - c_true[1, 1, :]).^2)
         mse_d2 = mean((c_hat[2, 2, :] - c_true[2, 2, :]).^2)
         mse_d3 = mean((c_hat[3, 3, :] - c_true[3, 3, :]).^2)
 
         @test mse_d1 < 0.2  # Looser tolerance for stochastic EM
-        @test mse_d2 < 3.0
+        @test mse_d2 < 0.2
         @test mse_d3 < 0.2
 
 
 
-
-
-
+# using Plots
+#    p_list = []
+#    for d in 1:D
+#     for k in 1:K
+#         p = plot(
+#             x, c_hat[k, d, :], label="Predicted",
+#         )
+#         plot!(p, x, c_true[k, d, :], label="True", linestyle = :dash)
+#         push!(p_list, p)
+#     end
+#    end
+#    plot(p_list..., layout=(D, K))
+#    plot!(
+#     x,
+#     sin.(x)
+#    )
 
 
     end

@@ -1,6 +1,8 @@
 # Paste the contents of your HmmSimFunctions.jl here
 module TestUtils
 
+include("../src/utils/helpers.jl") # Include helper functions
+
 using Random, Distributions, LinearAlgebra
 
 # --- Simulation Hyperparameters ---
@@ -26,7 +28,11 @@ Replicates the logic from the original `hmm_generate_multiple_eta_reg`.
 """
 function default_c_func(k, z, eta)
     # params is unused in the default but part of the interface
-    c_base_mean = (z < 0) * k + (z >= 0) * (z < 1) * -k + (z >= 1) * sin(k * z)
+    # c_base_mean = (z < 0) * k + (z >= 0) * (z < 1) * -k + (z >= 1) * sin(k * z)
+    # c_base_mean = k .* z .* (z > 0) .+ k .^ 2 .* (z < 0) .+ -k .* (z .>= 1)
+    # c_base_mean = (z < 0) * sin(k) + (z >= 0) * (z < 1) * k + (z >= 1) * cos(k * z)
+    # c_base_mean = k + z + k*z + k*z^2 + k^2*z + k^3*z^2
+    c_base_mean = (z < 0) * k + (z >= 0) * (z < 1) * -k + (z >= 1) -k^2
     return c_base_mean + eta
 end
 
@@ -54,7 +60,7 @@ function hmm_generate_multiple_eta_reg(; # Removed type hints for backward compa
     # Generate initial means, sort, and center using stationary distribution
     # Note: Requires create_stationary_omegas helper defined later
     μ_init = sort(rand(params.mu_dist, K))
-    μ      = create_stationary_omegas(μ_init, pi)
+    μ      = recentre_mu(μ_init, pi)
 
     η        = rand(params.eta_dist, D)       # random‑effect pool
     η_id     = rand(1:D, N)                   # id ↦ pool index
@@ -160,40 +166,40 @@ end
 #     return π
 # end
 
-"""
-    create_stationary_omegas(omega_init, pi_d)
+# """
+#     create_stationary_omegas(omega_init, pi_d)
 
-Rescales the vector `omega_init` so that:
-1. The element in the median position is forced to 0.
-2. The (weighted) mean with weights `pi_d` is zero.
+# Rescales the vector `omega_init` so that:
+# 1. The element in the median position is forced to 0.
+# 2. The (weighted) mean with weights `pi_d` is zero.
 
-Returns the rescaled vector.
-"""
-function create_stationary_omegas(omega_init::AbstractVector,
-                                  pi_d::AbstractVector)
+# Returns the rescaled vector.
+# """
+# function create_stationary_omegas(omega_init::AbstractVector,
+#                                   pi_d::AbstractVector)
 
-    K        = length(omega_init)
-    @assert length(pi_d) == K "pi_d must have the same length as omega_init"
+#     K        = length(omega_init)
+#     @assert length(pi_d) == K "pi_d must have the same length as omega_init"
 
-    med_idx  = fld(K + 1, 2)          # same as (K + 1) %/% 2 in R (1‑based)
+#     med_idx  = fld(K + 1, 2)          # same as (K + 1) %/% 2 in R (1‑based)
 
-    # 1. Remove the median element
-    keep_idx = setdiff(1:K, med_idx)  # indices except the median
-    omega_sub = omega_init[keep_idx]
-    pi_sub    = pi_d[keep_idx]
+#     # 1. Remove the median element
+#     keep_idx = setdiff(1:K, med_idx)  # indices except the median
+#     omega_sub = omega_init[keep_idx]
+#     pi_sub    = pi_d[keep_idx]
 
-    # 2. Compute rescaling factor so weighted mean is zero
-    rescale_factor = dot(pi_sub, omega_sub) / sum(pi_sub)
+#     # 2. Compute rescaling factor so weighted mean is zero
+#     rescale_factor = dot(pi_sub, omega_sub) / sum(pi_sub)
 
-    # 3. Shift the non‑median elements and re‑insert the median (=0)
-    new_omega_sub = omega_sub .- rescale_factor
+#     # 3. Shift the non‑median elements and re‑insert the median (=0)
+#     new_omega_sub = omega_sub .- rescale_factor
 
-    omega_rc = similar(omega_init)
-    omega_rc[med_idx] = 0.0
-    omega_rc[keep_idx] = new_omega_sub
+#     omega_rc = similar(omega_init)
+#     omega_rc[med_idx] = 0.0
+#     omega_rc[keep_idx] = new_omega_sub
 
-    return omega_rc
-end
+#     return omega_rc
+# end
 
 
 

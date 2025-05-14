@@ -325,8 +325,6 @@ function m_step!(params::MixtureHMMParams, data::MixtureHMMData, responsibilitie
         end
     end
 
-    # ω_recentred = recentre_mu(ω_new, π_s)
-    # params.ω .= ω_recentred
     params.ω .= ω_new ./ (ω_weight .+ 1e-8)
     params.ω .= recentre_mu(params.ω, π_s)
 
@@ -628,15 +626,6 @@ function e_step(params::RegressionHMMParams, data::RegressionHMMData)
             γ_total .+= responsibilities[i,d] .* exp.(logγ)
             
             # Calculate ξ
-            # for t in 1:(T_len-1)
-            #     for j in 1:K, k in 1:K
-            #         ξ_total[j,k,t] += responsibilities[i,d] * exp(
-            #             logα[j,t] + log(T_mat[j,k]) +
-            #             logpdf(Normal(ω_d[k], σ), y_seq[t+1]) +
-            #             logβ[k,t+1]
-            #         )
-            #     end
-            # end
             for t in 1:(T_len-1)
                 log_ξ = zeros(K, K)
                 for j in 1:K, k in 1:K

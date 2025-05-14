@@ -23,7 +23,7 @@ mutable struct StochasticEMConfig{F}
     max_data_size::Float64
 end
 
-function StochasticEMConfig(; weight_fn = x -> 1/log(x), t=0, full_batch_step=10, batch_size=20, max_data_size=Inf)
+function StochasticEMConfig(; weight_fn = x -> 1/x, t=0, full_batch_step=10, batch_size=20, max_data_size=Inf)
     return StochasticEMConfig(weight_fn, t, full_batch_step, batch_size, max_data_size)
 end
 
