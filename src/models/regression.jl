@@ -205,7 +205,7 @@ function logdensity(params::RegressionHMMParams{T}, data::RegressionHMMData{T}) 
 
     # Prior over regression parameters
     for d in 1:D, k in 1:K
-        logp += sum(logpdf(Normal(0, 5), beta[d, k, :]))  # you can tune the prior scale
+        logp += sum(logpdf(Normal(0, 100), beta[d, k, :]))  # you can tune the prior scale
     end
 
     # Prior over sigma_f
