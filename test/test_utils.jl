@@ -27,12 +27,8 @@ depending on the hidden state `z` and covariate `k_t`.
 Replicates the logic from the original `hmm_generate_multiple_eta_reg`.
 """
 function default_c_func(k, z, eta)
-    # params is unused in the default but part of the interface
-    # c_base_mean = (z < 0) * k + (z >= 0) * (z < 1) * -k + (z >= 1) * sin(k * z)
-    # c_base_mean = k .* z .* (z > 0) .+ k .^ 2 .* (z < 0) .+ -k .* (z .>= 1)
-    # c_base_mean = (z < 0) * sin(k) + (z >= 0) * (z < 1) * k + (z >= 1) * cos(k * z)
-    # c_base_mean = k + z + k*z + k*z^2 + k^2*z + k^3*z^2
-    c_base_mean = (z < 0) * k + (z >= 0) * (z < 1) * -k + (z >= 1) -k^2
+    # Alternating behavior for c based on the unit interval of z
+    c_base_mean = ifelse(isodd(floor(Int, z)), -k, k)
     return c_base_mean + eta
 end
 

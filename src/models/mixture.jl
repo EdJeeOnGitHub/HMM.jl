@@ -111,17 +111,17 @@ function logdensity(params::MixtureHMMParams, data::MixtureHMMData)
     
     # --- Log Priors --- 
     # Prior for ω (base means)
-    logp += sum(logpdf(Normal(0,1), ω))
-    # Prior for transition matrix rows
-    for i in 1:K
-        logp += logpdf(Dirichlet(ones(Tval, K) ./ K), T_list[i])
-    end
-    # Prior for σ (shared standard deviation)
-    logp += logpdf(Truncated(Normal(0,1), zero(Tval), Tval(Inf)), σ)
-    # Prior for η_raw (mixture means/locations)
-    logp += sum(logpdf(Normal(0,1), η_raw))
-    # Prior for η_θ (mixture weights)
-    logp += logpdf(Dirichlet(ones(Tval, D) ./ D), η_θ)
+    # logp += sum(logpdf(Normal(0,1), ω))
+    # # Prior for transition matrix rows
+    # for i in 1:K
+    #     logp += logpdf(Dirichlet(ones(Tval, K) ./ K), T_list[i])
+    # end
+    # # Prior for σ (shared standard deviation)
+    # logp += logpdf(Truncated(Normal(0,1), zero(Tval), Tval(Inf)), σ)
+    # # Prior for η_raw (mixture means/locations)
+    # logp += sum(logpdf(Normal(0,1), η_raw))
+    # # Prior for η_θ (mixture weights)
+    # logp += logpdf(Dirichlet(ones(Tval, D) ./ D), η_θ)
 
     # --- Log Likelihood --- 
     log_η_θ = log.(η_θ .+ eps(Tval)) # Precompute log weights, ensure non-zero

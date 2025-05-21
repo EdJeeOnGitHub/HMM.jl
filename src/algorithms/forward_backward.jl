@@ -34,7 +34,6 @@ function forward_logalpha(y, π1, A, μ, σ)
         for j in 1:K
             lpdf = _logpdf_normal(y[t], μ[j], σ)
             for i in 1:K
-                # acc[i] = logα[i, t-1] + log(A[i,j]) + lpdf # Original, log(0) possible
                 acc[i] = logα[i, t-1] + log_A[i,j] + lpdf
             end
             logα[j, t] = logsumexp(acc)
@@ -43,7 +42,6 @@ function forward_logalpha(y, π1, A, μ, σ)
     return logα
 end
 
-# TODO: Adapt function signatures?
 function backward_logbeta(y_seq, T_mat, ω, σ)
     K = size(T_mat, 1)
     T_len = length(y_seq)
@@ -69,7 +67,6 @@ function backward_logbeta(y_seq, T_mat, ω, σ)
         for k in 1:K
             acc = Vector{Tval}(undef, K)
             for k_next in 1:K
-                # acc[k_next] = log.(T_mat[k, k_next]) .+ logpdf.(Normal.(ω, σ), y_seq[t+1]) .+ logβ[:, t+1] # Original
                 acc[k_next] = log_T_mat[k, k_next] + log_likelihoods_t_plus_1[k_next] + logβ[k_next, t+1]
             end
             logβ[k, t] = logsumexp(acc)

@@ -26,7 +26,8 @@ function e_step(params::SimpleHMMParams, data::SimpleHMMData)
     # Consider allowing user-specified initial distribution?
     π_s = stationary(T_mat) # Use helper
     
-    ω_sorted = sort(ω) # Ensure means are sorted as expected by some parts
+    # ω_sorted = sort(ω) # Ensure means are sorted as expected by some parts
+    ω_sorted = ω # Ensure means are sorted as expected by some parts
 
     # Type stability: Determine calculation type based on params
     Tval = promote_type(eltype(ω), eltype(σ), eltype(T_mat))
@@ -394,7 +395,6 @@ function run_em!(params::SimpleHMMParams, data::SimpleHMMData; maxiter=50, tol=1
         end
 
         for iter in 1:maxiter
-            # Use E/M steps directly (should be in scope)
             γ_dict, ξ_dict = e_step(params, data)
             m_step!(params, data, γ_dict, ξ_dict)
             
@@ -574,8 +574,10 @@ function e_step(params::RegressionHMMParams, data::RegressionHMMData)
 
     T_mat = hcat(T_list...)'
     π_s = stationary(T_mat)
-    ω_sorted = sort(ω)
-    η_sorted = sort(η_raw)
+    # ω_sorted = sort(ω)
+    # η_sorted = sort(η_raw)
+    ω_sorted = ω
+    η_sorted = η_raw
 
     N = length(y_rag)
     responsibilities = zeros(N, D)

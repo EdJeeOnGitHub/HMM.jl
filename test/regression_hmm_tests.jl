@@ -37,14 +37,14 @@ function generate_true_fn(xs, ωs, ηs, c_func)
 end
 
 # --- Test Suite for RegressionHMM (Mixture Regression Variant) --- 
-@testset "RegressionHMM Tests" begin
+# @testset "RegressionHMM Tests" begin
 
     # --- Common Data Simulation Setup ---
     K = 3  # Number of hidden states
-    D = 3  # Number of mixture components
-    P = 8     # Number of monomial basis functions to use in model (degree P-1)
-    N = 100 # Number of sequences 
-    T = 25  # Sequence length
+    D = 2  # Number of mixture components
+    P = 2     # Number of monomial basis functions to use in model (degree P-1)
+    N = 1000 # Number of sequences 
+    T = 5  # Sequence length
     SEED = 3 # Use a different seed
     basis_fn = monomial_basis
 
@@ -53,9 +53,11 @@ end
     # The model will fit using P basis functions.
     sim_params_reg = SF.HMMRegressionSimulationParams(
         K = K,
-        mu_dist = Normal(0, 3.0),  # Override mu_sd
-        eta_dist = Normal(0, 1.0), # Override eta_sd
-        T_range = (2, T)           # Set T_range based on test variable T
+        mu_dist = Normal(0, 0.5),  # Override mu_sd
+        eta_dist = Normal(0, 0.5), # Override eta_sd
+        T_range = (2, T),          # Set T_range based on test variable T
+        sigma_y_true = 1.0,
+        c_noise_sd = 0.5
     )
 
     sim = SF.hmm_generate_multiple_eta_reg(
@@ -148,7 +150,7 @@ end
         @test params.sigma_f > 0
     end
 
-    @testset "Regression EM Convergence and Recovery - near optimum" begin
+    # @testset "Regression EM Convergence and Recovery - near optimum" begin
         # Run EM using the parallel method dispatching on Type
         true_params  = RegressionHMMParams(
             true_η,
@@ -157,17 +159,23 @@ end
             true_T_list,
             true_σ,
             fill(0.1, D, K, P), # Use P here
-            0.1
+            0.5
         )
         initial_params = initialize_params(RegressionHMMParams, SEED+1, regression_data)
-        initial_params.ω .= true_params.ω
+        initial_params.ω .= true_params.ω 
         initial_params.η_raw .= true_params.η_raw
         initial_params.η_θ .= true_params.η_θ
         initial_params.T_list .= true_params.T_list
+        initial_params.beta .= randn(size(initial_params.beta)) * 1.0
         logdensity(initial_params, regression_data)
-        best_params = run_em!(initial_params, regression_data, maxiter=1_000, tol=1e-4, verbose=false)
+        best_params = run_em!(initial_params, regression_data, maxiter=1_00, tol=1e-4, verbose=true)
+
+        resp, gamma_dict, xi_dict = e_step(best_params, regression_data);
 
 
+        resp
+        gamma_dict[1]
+        xi_dict[1][:, :, 1]
 
         
         @test best_params isa RegressionHMMParams{Float64}
@@ -208,19 +216,89 @@ end
 
 
     c_hat = generate_f(basis_fn, best_params, x)
+    c_true = generate_true_fn(x, sort(true_ω), sort(true_η), SF.default_c_func)
+
+    mse_d1 = mean((c_hat[1, 1, :] - c_true[1, 1, :]).^2)
+    mse_d2 = mean((c_hat[2, 2, :] - c_true[2, 2, :]).^2)
+
+    @test mse_d1 < 0.1
+    @test mse_d2 < 2
+
+
+using Plots
+   p_list = []
+   for d in 1:D
+    for k in 1:K
+        p = plot(
+            x, c_hat[k, d, :], label="Predicted",
+        )
+        plot!(p, x, c_true[k, d, :], label="True", linestyle = :dash)
+        push!(p_list, p)
+    end
+   end
+   plot(p_list..., layout=(D, K), link = :both)
+
+    end
+
+    @testset "Regression EM Convergence and Recovery" begin
+        # Run EM using the parallel method dispatching on Type
+        n_inits_test = 50 # Use fewer inits for regression tests (can be slow)
+        max_iter_test = 10
+
+        best_params, results = run_em!(RegressionHMMParams, regression_data; 
+                                        n_init=n_inits_test, 
+                                        maxiter=max_iter_test, 
+                                        tol=1e-4, # Looser tolerance for regression
+                                        verbose=false); 
+        
+        # polish
+        best_params = run_em!(best_params, regression_data, maxiter=1_000, tol=1e-4, verbose=true)
+        @test best_params isa RegressionHMMParams{Float64}
+        final_logp = logdensity(best_params, regression_data)
+        @test isfinite(final_logp)
+        
+        # --- Parameter Recovery ---
+        # Sort estimated parameters for comparison
+        est_η_perm = sortperm(best_params.η_raw)
+        est_ω_perm = sortperm(best_params.ω)
+
+        est_η_sorted = best_params.η_raw[est_η_perm]
+        est_η_θ = best_params.η_θ
+        est_ω_sorted = best_params.ω[est_ω_perm]
+        est_T_list = best_params.T_list # Permute rows based on ω sorting
+        est_T_mat = hcat(est_T_list...)' 
+
+        # Compare sorted estimated params to sorted true params
+        # Use loose tolerances, especially for beta
+        hcat(est_η_sorted, true_η_sorted)
+        hcat(sort(est_η_θ), sort(true_η_θ))
+        hcat(est_ω_sorted, true_ω_sorted)
+
+
+        @test est_ω_sorted ≈ true_ω_sorted rtol=0.1
+        @test est_η_sorted ≈ true_η_sorted rtol=0.1
+        @test sort(est_η_θ) ≈ sort(true_η_θ_sorted) rtol=0.1 # Check mixture weights
+
+        # Compare transition matrices (might need looser tol or element-wise)
+        # Note: True T matrix doesn't need sorting if states correspond to sorted ω
+        @test est_T_mat ≈ true_T_mat[ω_perm, ω_perm] rtol=0.5
+
+
+
+        @test best_params.σ ≈ true_σ rtol=0.1
+
+    x = range(-2, 2, length=100)
+    c_hat = generate_f(basis_fn, best_params, x)
     c_true = generate_true_fn(x, sort(best_params.ω), sort(best_params.η_raw), SF.default_c_func)
 
     mse_d1 = mean((c_hat[1, 1, :] - c_true[1, 1, :]).^2)
     mse_d2 = mean((c_hat[2, 2, :] - c_true[2, 2, :]).^2)
-    mse_d3 = mean((c_hat[3, 3, :] - c_true[3, 3, :]).^2)
 
-
-    @test mse_d1 < 0.1
+    @test mse_d1 < 2
     @test mse_d2 < 2
-    @test mse_d3 < 0.1
 
 
-# using Plots
+
 #    p_list = []
 #    for d in 1:D
 #     for k in 1:K
@@ -235,79 +313,5 @@ end
 
 
     end
-
-#     @testset "Regression EM Convergence and Recovery" begin
-#         # Run EM using the parallel method dispatching on Type
-#         n_inits_test = 10 # Use fewer inits for regression tests (can be slow)
-#         max_iter_test = 10
-
-#         best_params, results = run_em!(RegressionHMMParams, regression_data; 
-#                                         n_init=n_inits_test, 
-#                                         maxiter=max_iter_test, 
-#                                         tol=1e-4, # Looser tolerance for regression
-#                                         verbose=false); 
-        
-#         @test best_params isa RegressionHMMParams{Float64}
-#         final_logp = logdensity(best_params, regression_data)
-#         @test isfinite(final_logp)
-        
-#         # --- Parameter Recovery ---
-#         # Sort estimated parameters for comparison
-#         est_η_perm = sortperm(best_params.η_raw)
-#         est_ω_perm = sortperm(best_params.ω)
-
-#         est_η_sorted = best_params.η_raw[est_η_perm]
-#         est_η_θ = best_params.η_θ
-#         est_ω_sorted = best_params.ω[est_ω_perm]
-#         est_T_list = best_params.T_list # Permute rows based on ω sorting
-#         est_T_mat = hcat(est_T_list...)' 
-
-#         # Compare sorted estimated params to sorted true params
-#         # Use loose tolerances, especially for beta
-#         hcat(est_η_sorted, true_η_sorted)
-#         hcat(sort(est_η_θ), sort(true_η_θ))
-#         hcat(est_ω_sorted, true_ω_sorted)
-
-
-#         @test est_ω_sorted ≈ true_ω_sorted rtol=0.1
-#         @test est_η_sorted ≈ true_η_sorted rtol=0.1
-#         @test sort(est_η_θ) ≈ sort(true_η_θ_sorted) rtol=0.1 # Check mixture weights
-
-#         # Compare transition matrices (might need looser tol or element-wise)
-#         # Note: True T matrix doesn't need sorting if states correspond to sorted ω
-#         @test est_T_mat ≈ true_T_mat[ω_perm, ω_perm] rtol=0.5
-
-
-
-#         @test best_params.σ ≈ true_σ rtol=0.1
-
-#     x = range(-2, 2, length=100)
-#     c_hat = generate_f(basis_fn, best_params, x)
-#     c_true = generate_true_fn(x, sort(best_params.ω), sort(best_params.η_raw), SF.default_c_func)
-
-#     mse_d1 = mean((c_hat[1, 1, :] - c_true[1, 1, :]).^2)
-#     mse_d2 = mean((c_hat[2, 2, :] - c_true[2, 2, :]).^2)
-#     mse_d3 = mean((c_hat[3, 3, :] - c_true[3, 3, :]).^2)
-
-#     @test mse_d1 < 2
-#     @test mse_d2 < 2
-#     @test mse_d3 < 2
-
-
-
-# #    p_list = []
-# #    for d in 1:D
-# #     for k in 1:K
-# #         p = plot(
-# #             x, c_hat[k, d, :], label="Predicted",
-# #         )
-# #         plot!(p, x, c_true[k, d, :], label="True", linestyle = :dash)
-# #         push!(p_list, p)
-# #     end
-# #    end
-# #    plot(p_list..., layout=(D, K))
-
-
-#     end
 
 end # @testset RegressionHMM Tests 

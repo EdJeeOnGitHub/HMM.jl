@@ -25,6 +25,7 @@ include("models/simple.jl")
 include("models/mixture.jl")
 include("models/regression.jl") # Add include for regression model
 include("models/stochastic_regression.jl")
+include("models/ed-mixture.jl")
 
 # EM algorithm steps (may depend on models and core algorithms)
 include("algorithms/em.jl") 
@@ -41,6 +42,8 @@ export initialize_params # Generic initializer dispatch placeholder
 export logdensity # Generic logdensity dispatch placeholder
 export run_em! # Generic EM runner dispatch placeholder
 export e_step, m_step! # Export E/M steps if needed for debugging/advanced use
+export ed_e_step, ed_m_step!, ed_run_em!
+
 
 # Add exports for Mixture, Regression, Parallel etc. when implemented
 export MixtureHMMData, MixtureHMMParams
