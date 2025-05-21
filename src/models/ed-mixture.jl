@@ -230,7 +230,7 @@ end
 
 
 
-    function ed_m_step(params, data, log_u, log_nu, log_mix, log_z)
+    function ed_m_step!(params, data, log_u, log_nu, log_mix, log_z)
         (; y_rag, K, D) = data
 
         max_Q = m_step_qjk(log_nu)
@@ -256,7 +256,7 @@ end
         old_logp = logdensity(params, data)
         for iter in 1:maxiter
             log_u, log_nu, log_mix, log_z = ed_e_step(params, data)
-            params = ed_m_step(params, data, log_u, log_nu, log_mix, log_z)
+            params = ed_m_step!(params, data, log_u, log_nu, log_mix, log_z)
             new_logp = logdensity(params, data)
             if new_logp < old_logp
                 println("Warning: log density decreased from $old_logp to $new_logp")
